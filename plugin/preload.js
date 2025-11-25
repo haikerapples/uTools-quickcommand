@@ -288,9 +288,12 @@ window.runCodeFile = (
   const script = getQuickcommandTempFile(ext, "quickcommandTempScript");
 
   // 处理编码和换行
+  // 只在 Windows 系统上或特定语言（cmd、bat、powershell）时才转换为 CRLF
+  const needsCRLF = utools.isWindows() || ['.bat', '.cmd', '.ps1'].includes(ext);
+  const normalizedCmd = needsCRLF ? cmd.replace(/\n/g, "\r\n") : cmd;
   const processedCmd = charset.scriptCode
-    ? iconv.encode(cmd.replace(/\n/g, "\r\n"), charset.scriptCode)
-    : cmd;
+    ? iconv.encode(normalizedCmd, charset.scriptCode)
+    : normalizedCmd;
   fs.writeFileSync(script, processedCmd);
   // 构建命令行
   let cmdline = buildCommandLine(bin, argv, script, scptarg);
@@ -298,7 +301,10 @@ window.runCodeFile = (
   // 处理环境变量
   const processEnv = window.lodashM.cloneDeep(process.env);
   if (envPath) processEnv.PATH = envPath;
-  if (alias) cmdline = `${alias}\n${cmdline}`;
+  if (alias) {
+    const lineBreak = utools.isWindows() ? '\r\n' : '\n';
+    cmdline = `${alias}${lineBreak}${cmdline}`;
+  }
   if (!!terminalOptions) {
     cmdline = createTerminalCommand(cmdline, terminalOptions);
   }
