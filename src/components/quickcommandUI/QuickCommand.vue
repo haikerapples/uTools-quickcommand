@@ -280,6 +280,8 @@ export default {
      * @param options.runInTerminal.dir 运行目录
      * @param options.runInTerminal.windows windows使用的终端，默认wt
      * @param options.runInTerminal.macos macos使用的终端，默认warp
+     * @param options.waitForCompletion 是否等待终端命令执行完成（仅在runInTerminal模式下有效）
+     * @param options.timeout 等待超时时间（毫秒），默认300000（5分钟）
      */
     quickcommand.runCode = (code, options) => {
       return new Promise((reslove, reject) => {
@@ -288,6 +290,8 @@ export default {
           language = isWin ? "cmd" : "shell",
           args = [],
           runInTerminal,
+          waitForCompletion = false,
+          timeout = 300000,
         } = options;
 
         if (!options.scriptCode) {
@@ -315,20 +319,134 @@ export default {
         }
         const argsStr = args.map(unescapeAndQuote).join(" ");
 
-        window.runCodeFile(
-          code,
-          {
-            ...programs[language],
-            charset: {
-              scriptCode: options.scriptCode,
-              outputCode: options.outputCode,
+        // 如果需要等待完成且在终端模式下运行
+        let signalFilePath = null;
+        let modifiedCode = code;
+
+        if (runInTerminalOptions && waitForCompletion) {
+          signalFilePath = window.generateSignalFilePath();
+
+          // 根据不同语言添加创建信号文件的命令
+          if (language === 'shell' || language === 'bash' || language === 'zsh') {
+            // Unix shell
+            modifiedCode = `${code}\necho "done" > "${signalFilePath}"`;
+          } else if (language === 'cmd') {
+            // Windows cmd
+            modifiedCode = `${code}\necho done > "${signalFilePath}"`;
+          } else if (language === 'powershell') {
+            // PowerShell
+            modifiedCode = `${code}\n"done" | Out-File -FilePath "${signalFilePath}"`;
+          } else if (language === 'python' || language === 'python3') {
+            // Python
+            modifiedCode = `${code}\nimport os\nwith open(r"${signalFilePath}", "w") as f: f.write("done")`;
+          } else if (language === 'node' || language === 'nodejs') {
+            // Node.js
+            modifiedCode = `${code}\nrequire('fs').writeFileSync("${signalFilePath}", "done");`;
+          } else if (language === 'ruby') {
+            // Ruby
+            modifiedCode = `${code}\nFile.write("${signalFilePath}", "done")`;
+          } else if (language === 'perl') {
+            // Perl
+            modifiedCode = `${code}\nopen(my $fh, '>', "${signalFilePath}"); print $fh "done"; close($fh);`;
+          } else if (language === 'php') {
+            // PHP
+            modifiedCode = `${code}\nfile_put_contents("${signalFilePath}", "done");`;
+          } else if (language === 'applescript') {
+            // AppleScript
+            const escapedPath = signalFilePath.replace(/"/g, '\\"');
+            modifiedCode = `${code}\ndo shell script "echo 'done' > \\"${escapedPath}\\""`;
+          } else if (language === 'lua') {
+            // Lua
+            modifiedCode = `${code}\nlocal file = io.open("${signalFilePath}", "w")\nfile:write("done")\nfile:close()`;
+          } else if (language === 'c' || language === 'csharp') {
+            // C/C# 编译型语言，在编译后的可执行文件末尾添加信号文件创建
+            // 注意：这需要在源代码中添加，编译后执行
+            if (language === 'c') {
+              modifiedCode = `${code}\n#include <stdio.h>\nFILE *fp = fopen("${signalFilePath}", "w");\nif(fp) { fprintf(fp, "done"); fclose(fp); }`;
+            } else {
+              // C#
+              modifiedCode = `${code}\nSystem.IO.File.WriteAllText("${signalFilePath}", "done");`;
+            }
+          } else if (language === 'custom') {
+            // 自定义语言，尝试使用shell命令创建信号文件
+            const isWin = window.utools.isWindows();
+            const signalCmd = isWin
+              ? `\necho done > "${signalFilePath}"`
+              : `\necho "done" > "${signalFilePath}"`;
+            modifiedCode = `${code}${signalCmd}`;
+          } else {
+            // 其他语言不支持等待完成
+            console.warn(`语言 ${language} 不支持 waitForCompletion 选项`);
+          }
+        }
+
+        // 在终端模式下且需要等待完成时，不依赖callback，直接等待信号文件
+        if (runInTerminalOptions && signalFilePath) {
+          // 启动终端执行脚本
+          window.runCodeFile(
+            modifiedCode,
+            {
+              ...programs[language],
+              charset: {
+                scriptCode: options.scriptCode,
+                outputCode: options.outputCode,
+              },
+              scptarg: argsStr,
             },
-            scptarg: argsStr,
-          },
-          runInTerminalOptions,
-          (result, err) => (err ? reject(err) : reslove(result)),
-          false
-        );
+            runInTerminalOptions,
+            (result, err) => {
+              // 在终端模式下，这个callback会在终端窗口打开后立即调用
+              // 不在这里处理等待逻辑
+              if (err) {
+                console.error('启动终端失败:', err);
+              }
+            },
+            false
+          );
+
+          // 立即开始等待信号文件（不等待callback）
+          // 使用立即执行的async函数来处理await
+          (async () => {
+            try {
+              await window.waitForSignalFile(signalFilePath, timeout);
+              reslove(''); // 终端模式下没有输出结果
+            } catch (waitErr) {
+              reject(waitErr);
+            }
+          })();
+        } else {
+          // 非终端模式或不需要等待完成
+          window.runCodeFile(
+            modifiedCode,
+            {
+              ...programs[language],
+              charset: {
+                scriptCode: options.scriptCode,
+                outputCode: options.outputCode,
+              },
+              scptarg: argsStr,
+            },
+            runInTerminalOptions,
+            async (result, err) => {
+              if (err) {
+                reject(err);
+              } else {
+                // 如果需要等待完成（非终端模式），则等待信号文件
+                if (signalFilePath) {
+                  try {
+                    await window.waitForSignalFile(signalFilePath, timeout);
+                    reslove(result);
+                  } catch (waitErr) {
+                    reject(waitErr);
+                  }
+                } else {
+                  reslove(result);
+                }
+              }
+            },
+            false
+          );
+        }
       });
     };
 

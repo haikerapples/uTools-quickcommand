@@ -277,6 +277,43 @@ const handleProcessOutput = (child, charset, callback, realTime) => {
   }
 };
 
+// 等待信号文件的辅助函数
+window.waitForSignalFile = (signalFilePath, timeout = 300000) => {
+  return new Promise((resolve, reject) => {
+    const startTime = Date.now();
+    const checkInterval = 500; // 每500ms检查一次
+
+    const checkFile = () => {
+      if (fs.existsSync(signalFilePath)) {
+        // 文件存在，删除它并resolve
+        try {
+          fs.unlinkSync(signalFilePath);
+          resolve(true);
+        } catch (err) {
+          console.error('删除信号文件失败:', err);
+          resolve(true); // 即使删除失败也继续
+        }
+      } else if (Date.now() - startTime > timeout) {
+        // 超时
+        reject(new Error(`等待脚本执行完成超时（${timeout}ms）`));
+      } else {
+        // 继续等待
+        setTimeout(checkFile, checkInterval);
+      }
+    };
+
+    checkFile();
+  });
+};
+
+// 生成唯一的信号文件路径
+window.generateSignalFilePath = () => {
+  const tempDir = utools.getPath('temp');
+  const timestamp = Date.now();
+  const random = Math.random().toString(36).substring(7);
+  return path.join(tempDir, `quickcommand_signal_${timestamp}_${random}.txt`);
+};
+
 window.runCodeFile = (
   cmd,
   option,

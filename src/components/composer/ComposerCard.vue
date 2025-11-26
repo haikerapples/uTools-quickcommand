@@ -154,7 +154,7 @@ export default defineComponent({
   },
   methods: {
     handleOutputVariableUpdate(result) {
-      const { outputVariable, asyncMode, callbackFunc } = result;
+      const { outputVariable, asyncMode, callbackFunc, awaitTimeout } = result;
 
       if (outputVariable.name || outputVariable.details) {
         this.localCommand.outputVariable = { ...outputVariable };
@@ -184,6 +184,22 @@ export default defineComponent({
           });
         } else {
           delete this.localCommand.callbackFunc;
+        }
+        // 如果是等待模式，添加 awaitTimeout 属性
+        if (asyncMode === "await" && awaitTimeout) {
+          this.localCommand.awaitTimeout = awaitTimeout;
+          // 同时更新 argvs 中的 timeout 和 waitForCompletion
+          if (this.localCommand.argvs) {
+            this.localCommand.argvs.waitForCompletion = true;
+            this.localCommand.argvs.timeout = awaitTimeout;
+          }
+        } else {
+          delete this.localCommand.awaitTimeout;
+          // 同时清除 argvs 中的相关属性
+          if (this.localCommand.argvs) {
+            this.localCommand.argvs.waitForCompletion = false;
+            delete this.localCommand.argvs.timeout;
+          }
         }
       }
     },

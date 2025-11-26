@@ -115,6 +115,17 @@
                 :show-function-list="true"
               />
             </template>
+            <template v-if="asyncMode === 'await' && isTerminalCommand">
+              <q-input
+                v-model.number="awaitTimeout"
+                label="超时时间（秒）"
+                type="number"
+                filled
+                dense
+                hint="等待运行完毕的超时时间，默认300秒（5分钟）"
+                class="col-12"
+              />
+            </template>
           </div>
         </SectionBlock>
       </template>
@@ -209,6 +220,10 @@ export default defineComponent({
     currentOutputs() {
       return this.currentSubCommand.outputs || this.command.outputs;
     },
+    isTerminalCommand() {
+      // 判断是否是运行脚本命令（无论是否在终端运行，都支持设置超时）
+      return this.command.value === "quickcommand.runCode";
+    },
   },
   data() {
     return {
@@ -216,6 +231,7 @@ export default defineComponent({
       outputVars: {},
       asyncMode: "await",
       callbackFunc: "",
+      awaitTimeout: 300,
       asyncModeOptions: [
         {
           label: "等待运行完毕",
@@ -245,6 +261,12 @@ export default defineComponent({
     "command.callbackFunc": {
       handler(value) {
         this.callbackFunc = value;
+      },
+      immediate: true,
+    },
+    "command.awaitTimeout": {
+      handler(value) {
+        this.awaitTimeout = value || 300;
       },
       immediate: true,
     },
@@ -292,6 +314,10 @@ export default defineComponent({
         // 如果是回调函数模式，添加回调函数名和参数信息
         if (this.asyncMode === "then" && this.callbackFunc) {
           result.callbackFunc = this.callbackFunc;
+        }
+        // 如果是等待模式且是终端命令，添加超时时间
+        if (this.asyncMode === "await" && this.isTerminalCommand && this.awaitTimeout) {
+          result.awaitTimeout = this.awaitTimeout;
         }
       }
 

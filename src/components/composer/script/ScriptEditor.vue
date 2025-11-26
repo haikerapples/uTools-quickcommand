@@ -140,6 +140,22 @@
                   />
                 </div>
               </div>
+              <CheckButton
+                :model-value="!!argvs.waitForCompletion"
+                @update:modelValue="updateArgvs('waitForCompletion', $event)"
+                label="等待运行完毕"
+              />
+              <q-input
+                v-if="argvs.waitForCompletion"
+                :model-value="argvs.timeout"
+                @update:modelValue="updateArgvs('timeout', $event)"
+                label="超时时间（秒）"
+                type="number"
+                filled
+                dense
+                hint="默认300秒（5分钟）"
+                class="col-12"
+              />
             </template>
           </div>
         </BorderLabel>
@@ -183,6 +199,8 @@ export default defineComponent({
         scriptCode: null,
         outputCode: null,
         runInTerminal: null,
+        waitForCompletion: false,
+        timeout: 300,
       },
       programs: programs,
       windowsTerminalOptions: ["wt", "cmd"],
@@ -249,6 +267,13 @@ export default defineComponent({
 
       if (argvs.runInTerminal) {
         options.runInTerminal = { ...argvs.runInTerminal };
+      }
+
+      if (argvs.waitForCompletion) {
+        options.waitForCompletion = true;
+        if (argvs.timeout) {
+          options.timeout = Number(argvs.timeout) * 1000; // 转换为毫秒
+        }
       }
 
       return `${this.modelValue.value}(${stringifyArgv(
