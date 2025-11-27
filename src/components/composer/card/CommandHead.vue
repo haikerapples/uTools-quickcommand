@@ -21,8 +21,19 @@
 
     <!-- 标题 -->
     <div class="command-label" v-if="!isControlFlow">
-      <div class="drag-handle text-subtitle2 command-label-text">
-        {{ command.label }}
+      <div class="title-with-info">
+        <div class="drag-handle text-subtitle2 command-label-text">
+          {{ command.label }}
+        </div>
+        <q-icon
+          name="info"
+          class="info-icon-inline"
+          v-if="command.description && !isCollapsed"
+        >
+          <q-tooltip max-width="300px">
+            {{ command.description }}
+          </q-tooltip>
+        </q-icon>
       </div>
       <div
         v-if="isCollapsed"
@@ -51,16 +62,6 @@
         />
       </div>
     </div>
-
-    <q-icon
-      name="info"
-      class="info-icon"
-      v-if="command.description && !isCollapsed"
-    >
-      <q-tooltip max-width="300px">
-        {{ command.description }}
-      </q-tooltip>
-    </q-icon>
 
     <!-- 主要内容区域 -->
     <div :class="contentClass">
@@ -115,7 +116,7 @@ export default {
   computed: {
     contentClass() {
       return {
-        col: true,
+        col: !this.isCollapsed,
         "q-ml-md": !this.command.isControlFlow,
       };
     },
@@ -180,11 +181,21 @@ export default {
   align-items: center;
   gap: 8px;
   margin-right: 8px;
+  flex: 1;
+  min-width: 0;
 }
 
 .command-label-text {
   cursor: grab;
   transition: all 0.3s ease;
+  white-space: nowrap;
+  min-width: fit-content;
+  font-weight: bold;
+  flex-shrink: 0;
+  height: 40px;
+  font-size: 15px;
+  display: flex;
+  align-items: center;
 }
 
 .command-label-text:hover {
@@ -197,25 +208,45 @@ export default {
   text-overflow: ellipsis;
   white-space: nowrap;
   color: gray;
-  font-size: 11px;
+  font-size: 13px;
 }
 
 .summary-container {
   cursor: text;
-  width: 200px;
+  min-width: 200px;
+  flex: 1;
 }
 
-.info-icon {
+.title-with-info {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.info-icon-inline {
   opacity: 0.6;
   font-size: 12px;
+  cursor: help;
+  flex-shrink: 0;
+}
+
+.info-icon-inline:hover {
+  opacity: 1;
+  color: var(--q-primary);
+}
+
+.summary-input {
+  width: 100% !important;
 }
 
 .summary-input :deep(.q-field__control),
 .summary-input :deep(.q-field__native),
 .summary-input :deep(.q-field__marginal) {
-  height: 20px !important;
-  min-height: 20px;
-  font-size: 11px;
+  height: 40px !important;
+  min-height: 40px;
+  font-size: 13px;
   color: gray;
+  width: 100% !important;
 }
 </style>
