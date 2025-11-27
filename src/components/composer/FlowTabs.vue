@@ -199,6 +199,12 @@ export default defineComponent({
       return flows.value.find((flow) => flow.id === activeTab.value);
     };
 
+    // 提供当前流程信息给子组件
+    provide("getCurrentFlow", getCurrentFlow);
+
+    // 提供commandConfig给子组件，用于获取编排名称
+    provide("getCommandConfig", () => commandConfig.value);
+
     const route = useRoute();
 
     const isRunComposerPage = computed(() => {

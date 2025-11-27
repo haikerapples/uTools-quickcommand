@@ -35,13 +35,13 @@ const killProcess = async function (target) {
 /**
  * 启动进程
  * @param {string} path 程序路径
- * @param {string} arguments 启动参数
+ * @param {string} processArgs 启动参数
  * @returns {boolean} 是否成功
  */
-const startProcess = async function (path, arguments = "") {
+const startProcess = async function (path, processArgs = "") {
   const args = ["-type", "start", "-path", path];
-  if (arguments) {
-    args.push("-args", arguments);
+  if (processArgs) {
+    args.push("-args", processArgs);
   }
   const result = await runCsharpFeature("process", args);
   if (result && result.startsWith("Error:")) {

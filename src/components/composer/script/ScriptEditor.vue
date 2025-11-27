@@ -165,7 +165,7 @@
 </template>
 
 <script>
-import { defineComponent } from "vue";
+import { defineComponent, inject } from "vue";
 import { newVarInputVal } from "js/composer/varInputValManager";
 import CodeEditor from "components/editor/CodeEditor.vue";
 import VariableInput from "components/composer/common/VariableInput.vue";
@@ -190,6 +190,18 @@ export default defineComponent({
     modelValue: Object,
   },
   emits: ["update:modelValue"],
+  setup() {
+    // 注入当前流程信息、命令索引和编排配置
+    const getCurrentFlow = inject("getCurrentFlow", null);
+    const commandIndex = inject("commandIndex", null);
+    const getCommandConfig = inject("getCommandConfig", null);
+
+    return {
+      getCurrentFlow,
+      commandIndex,
+      getCommandConfig,
+    };
+  },
   data() {
     return {
       defaultArgvs: {
@@ -274,6 +286,19 @@ export default defineComponent({
         if (argvs.timeout) {
           options.timeout = Number(argvs.timeout) * 1000; // 转换为毫秒
         }
+      }
+
+      // 添加脚本名称：编排名称 - 用户描述
+      if (argvs.runInTerminal) {
+        // 获取编排名称（用户在"请输入名称"中输入的值）
+        const commandConfig = this.getCommandConfig ? this.getCommandConfig() : null;
+        const composerName = commandConfig?.features?.explain || "QuickCommand";
+
+        // 获取用户描述（"单击修改描述"中的值）
+        const userDesc = this.modelValue.userComments || "运行脚本";
+
+        const scriptName = `【${composerName}】- ${userDesc}`;
+        options.scriptName = scriptName;
       }
 
       return `${this.modelValue.value}(${stringifyArgv(

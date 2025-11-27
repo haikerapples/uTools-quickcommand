@@ -9,7 +9,7 @@ const DEFAULT_TERMINALS = {
 
 // Windows 终端命令生成器
 const getWindowsTerminalCommand = (cmdline, options = {}) => {
-  const { dir, terminal = "wt" } = options;
+  const { dir, terminal = "wt", title } = options;
   const appPath = path.join(
     window.utools.getPath("home"),
     "/AppData/Local/Microsoft/WindowsApps/"
@@ -23,14 +23,16 @@ const getWindowsTerminalCommand = (cmdline, options = {}) => {
       ) {
         const escapedCmd = cmdline.replace(/"/g, `\\"`);
         const cd = dir ? `-d "${dir.replace(/\\/g, "/")}"` : "";
-        return `${appPath}wt.exe ${cd} cmd /k "${escapedCmd}"`;
+        const titleArg = title ? `--title "${title}"` : "";
+        return `${appPath}wt.exe ${titleArg} ${cd} cmd /k "${escapedCmd}"`;
       }
       return null;
     },
     cmd: () => {
       const escapedCmd = cmdline.replace(/"/g, `^"`);
       const cd = dir ? `cd /d "${dir.replace(/\\/g, "/")}" &&` : "";
-      return `${cd} start "" cmd /k "${escapedCmd}"`;
+      const windowTitle = title || "QuickCommand Script";
+      return `${cd} start "${windowTitle}" cmd /k "${escapedCmd}"`;
     },
   };
 
@@ -51,7 +53,7 @@ const getWindowsTerminalCommand = (cmdline, options = {}) => {
 
 // macOS 终端命令生成器
 const getMacTerminalCommand = (cmdline, options = {}) => {
-  const { dir, terminal = "warp" } = options;
+  const { dir, terminal = "warp", title } = options;
 
   const terminalCommands = {
     warp: () => {
@@ -72,11 +74,14 @@ const getMacTerminalCommand = (cmdline, options = {}) => {
         }
 
         // 创建配置文件，对于 Warp，命令不需要转义，因为是通过 YAML 配置传递
+        const windowTitle = title || `QuickCommand-${Date.now()}`;
         const config = `---
 name: ${configName}
 windows:
-  - tabs:
-      - layout:
+  - title: "${windowTitle}"
+    tabs:
+      - title: "${title || 'Script'}"
+        layout:
           cwd: "${workingDir}"
           commands:
             - exec: ${cmdline}`;
@@ -92,11 +97,16 @@ windows:
       const escapedCmd = cmdline.replace(/"/g, `\\"`);
       const cd = dir ? `cd ${dir.replace(/ /g, "\\\\ ")} &&` : "";
       if (fs.existsSync("/Applications/iTerm.app")) {
+        const windowTitle = title || "QuickCommand Script";
+        // 使用 AppleScript 设置会话名称
         return `osascript -e 'tell application "iTerm"
           if application "iTerm" is running then
             create window with default profile
           end if
-          tell current session of first window to write text "clear && ${cd} ${escapedCmd}"
+          tell current session of first window
+            set name to "${windowTitle}"
+            write text "clear && ${cd} ${escapedCmd}"
+          end tell
           activate
         end tell'`;
       }
@@ -105,11 +115,14 @@ windows:
     terminal: () => {
       const escapedCmd = cmdline.replace(/"/g, `\\"`);
       const cd = dir ? `cd ${dir.replace(/ /g, "\\\\ ")} &&` : "";
+      const windowTitle = title || "QuickCommand Script";
       return `osascript -e 'tell application "Terminal"
         if application "Terminal" is running then
           do script "clear && ${cd} ${escapedCmd}"
+          set custom title of front window to "${windowTitle}"
         else
           do script "clear && ${cd} ${escapedCmd}" in window 1
+          set custom title of front window to "${windowTitle}"
         end if
         activate
       end tell'`;

@@ -280,8 +280,10 @@ export default {
      * @param options.runInTerminal.dir 运行目录
      * @param options.runInTerminal.windows windows使用的终端，默认wt
      * @param options.runInTerminal.macos macos使用的终端，默认warp
+     * @param options.runInTerminal.title 终端窗口标题
      * @param options.waitForCompletion 是否等待终端命令执行完成（仅在runInTerminal模式下有效）
      * @param options.timeout 等待超时时间（毫秒），默认300000（5分钟）
+     * @param options.scriptName 脚本名称，用于终端标题（可选）
      */
     quickcommand.runCode = (code, options) => {
       return new Promise((reslove, reject) => {
@@ -292,6 +294,7 @@ export default {
           runInTerminal,
           waitForCompletion = false,
           timeout = 300000,
+          scriptName,
         } = options;
 
         if (!options.scriptCode) {
@@ -307,6 +310,14 @@ export default {
         // 兼容编排，传入true时，使用默认终端
         const runInTerminalOptions =
           runInTerminal === true ? {} : runInTerminal;
+
+        // 如果有脚本名称且在终端模式下运行，设置终端标题
+        if (runInTerminalOptions && scriptName) {
+          runInTerminalOptions.title = scriptName;
+        } else if (runInTerminalOptions && !runInTerminalOptions.title) {
+          // 如果没有指定标题，使用默认标题
+          runInTerminalOptions.title = `【QuickCommand】- ${language}`;
+        }
 
         const unescapeAndQuote = (str) => `"${str.replace(/\\"/g, '"')}"`;
 
