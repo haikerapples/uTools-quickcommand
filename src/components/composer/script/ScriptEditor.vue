@@ -341,6 +341,17 @@ export default defineComponent({
       this.$refs.codeEditor.replaceEditorSelection(replaceVar);
     },
   },
+  watch: {
+    // 监听 userComments 的变化，当用户修改描述后立即重新生成代码
+    "modelValue.userComments": {
+      handler() {
+        // 只有在终端运行模式下才需要重新生成代码（因为终端名称依赖 userComments）
+        if (this.argvs.runInTerminal) {
+          this.updateModelValue(this.argvs);
+        }
+      },
+    },
+  },
   mounted() {
     this.updateModelValue(this.argvs);
   },

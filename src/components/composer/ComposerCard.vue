@@ -36,7 +36,7 @@
         <CommandHead
           :command="localCommand"
           @update:outputVariable="handleOutputVariableUpdate"
-          @update:summary="localCommand.userComments = $event"
+          @update:summary="handleSummaryUpdate"
           @toggle-collapse="handleToggleCollapse"
           @run="runCommand"
           @remove="$emit('remove')"
@@ -153,6 +153,14 @@ export default defineComponent({
     provide("commandIndex", commandIndex);
   },
   methods: {
+    handleSummaryUpdate(value) {
+      // 如果用户删除为空，则删除 userComments 属性，让其回退到显示默认的 summary
+      if (value === "" || value === null || value === undefined) {
+        delete this.localCommand.userComments;
+      } else {
+        this.localCommand.userComments = value;
+      }
+    },
     handleOutputVariableUpdate(result) {
       const { outputVariable, asyncMode, callbackFunc, awaitTimeout } = result;
 

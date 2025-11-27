@@ -43,7 +43,7 @@
           v-else
           borderless
           class="summary-input"
-          :model-value="commandSummary"
+          :model-value="command.userComments"
           @update:model-value="$emit('update:summary', $event)"
           @blur="isEditingSummary = false"
           autofocus
