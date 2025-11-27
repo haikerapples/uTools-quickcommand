@@ -1,5 +1,6 @@
 const fs = require("fs");
 const path = require("path");
+const terminalWindowManager = require("./terminalWindowManager");
 
 // 终端配置
 const DEFAULT_TERMINALS = {
@@ -9,7 +10,7 @@ const DEFAULT_TERMINALS = {
 
 // Windows 终端命令生成器
 const getWindowsTerminalCommand = (cmdline, options = {}) => {
-  const { dir, terminal = "wt", title } = options;
+  const { dir, terminal = "wt", title, reuseWindow = false } = options;
   const appPath = path.join(
     window.utools.getPath("home"),
     "/AppData/Local/Microsoft/WindowsApps/"
@@ -24,6 +25,22 @@ const getWindowsTerminalCommand = (cmdline, options = {}) => {
         const escapedCmd = cmdline.replace(/"/g, `\\"`);
         const cd = dir ? `-d "${dir.replace(/\\/g, "/")}"` : "";
         const titleArg = title ? `--title "${title}"` : "";
+
+        // 检查是否需要复用窗口
+        if (reuseWindow) {
+          const scriptName = options.scriptName || options.title;
+          const windowInfo = terminalWindowManager.getOrCreateWindow('wt', scriptName);
+
+          if (windowInfo.isNew) {
+            // 创建新窗口
+            return `${appPath}wt.exe ${titleArg} ${cd} cmd /k "${escapedCmd}"`;
+          } else {
+            // 在现有窗口创建新标签页
+            return `${appPath}wt.exe -w 0 new-tab ${titleArg} ${cd} cmd /k "${escapedCmd}"`;
+          }
+        }
+
+        // 不复用窗口，每次创建新窗口
         return `${appPath}wt.exe ${titleArg} ${cd} cmd /k "${escapedCmd}"`;
       }
       return null;
@@ -32,6 +49,7 @@ const getWindowsTerminalCommand = (cmdline, options = {}) => {
       const escapedCmd = cmdline.replace(/"/g, `^"`);
       const cd = dir ? `cd /d "${dir.replace(/\\/g, "/")}" &&` : "";
       const windowTitle = title || "QuickCommand Script";
+      // CMD不支持标签页复用，始终创建新窗口
       return `${cd} start "${windowTitle}" cmd /k "${escapedCmd}"`;
     },
   };
@@ -53,7 +71,7 @@ const getWindowsTerminalCommand = (cmdline, options = {}) => {
 
 // macOS 终端命令生成器
 const getMacTerminalCommand = (cmdline, options = {}) => {
-  const { dir, terminal = "warp", title } = options;
+  const { dir, terminal = "warp", title, reuseWindow = false } = options;
 
   const terminalCommands = {
     warp: () => {
@@ -98,7 +116,40 @@ windows:
       const cd = dir ? `cd ${dir.replace(/ /g, "\\\\ ")} &&` : "";
       if (fs.existsSync("/Applications/iTerm.app")) {
         const windowTitle = title || "QuickCommand Script";
-        // 使用 AppleScript 设置会话名称
+
+        // 检查是否需要复用窗口
+        if (reuseWindow) {
+          const scriptName = options.scriptName || options.title;
+          const windowInfo = terminalWindowManager.getOrCreateWindow('iterm', scriptName);
+
+          if (windowInfo.isNew) {
+            // 创建新窗口
+            return `osascript -e 'tell application "iTerm"
+              if application "iTerm" is running then
+                create window with default profile
+              end if
+              tell current session of first window
+                set name to "${windowTitle}"
+                write text "clear && ${cd} ${escapedCmd}"
+              end tell
+              activate
+            end tell'`;
+          } else {
+            // 在现有窗口创建新标签页
+            return `osascript -e 'tell application "iTerm"
+              tell first window
+                create tab with default profile
+                tell current session
+                  set name to "${windowTitle}"
+                  write text "clear && ${cd} ${escapedCmd}"
+                end tell
+              end tell
+              activate
+            end tell'`;
+          }
+        }
+
+        // 不复用窗口，每次创建新窗口
         return `osascript -e 'tell application "iTerm"
           if application "iTerm" is running then
             create window with default profile
@@ -115,15 +166,69 @@ windows:
     terminal: () => {
       const escapedCmd = cmdline.replace(/"/g, `\\"`);
       const cd = dir ? `cd ${dir.replace(/ /g, "\\\\ ")} &&` : "";
-      const windowTitle = title || "QuickCommand Script";
+      const tabTitle = title || "QuickCommand Script";
+
+      // 检查是否需要复用窗口
+      if (reuseWindow) {
+        const scriptName = options.scriptName || options.title;
+        const windowInfo = terminalWindowManager.getOrCreateWindow('terminal', scriptName);
+        const windowTitle = windowInfo.windowTitle;
+
+        if (windowInfo.isNew) {
+          // 创建新窗口
+          return `osascript -e 'tell application "Terminal"
+            do script "clear && ${cd} ${escapedCmd}"
+            set custom title of front window to "${windowTitle}"
+            activate
+          end tell'`;
+        } else {
+          // 在现有窗口创建新标签页（使用System Events）
+          return `osascript -e 'tell application "Terminal"
+            -- 查找目标窗口
+            set targetWindow to missing value
+            repeat with w in windows
+              try
+                if custom title of w is "${windowTitle}" then
+                  set targetWindow to w
+                  exit repeat
+                end if
+              on error
+                -- 忽略没有自定义标题的窗口
+              end try
+            end repeat
+
+            if targetWindow is not missing value then
+              -- 激活目标窗口
+              set index of targetWindow to 1
+              activate
+
+              -- 使用System Events创建新标签页
+              tell application "System Events"
+                tell process "Terminal"
+                  keystroke "t" using command down
+                end tell
+              end tell
+
+              -- 等待新标签页创建完成
+              delay 0.3
+
+              -- 在新标签页中执行命令
+              do script "clear && ${cd} ${escapedCmd}" in front tab of targetWindow
+            else
+              -- 如果找不到目标窗口，创建新窗口
+              do script "clear && ${cd} ${escapedCmd}"
+              set custom title of front window to "${windowTitle}"
+            end if
+            activate
+          end tell'`;
+        }
+      }
+
+      // 不复用窗口，每次创建新窗口
+      const windowTitle = options.scriptName || options.title || title || "QuickCommand Script";
       return `osascript -e 'tell application "Terminal"
-        if application "Terminal" is running then
-          do script "clear && ${cd} ${escapedCmd}"
-          set custom title of front window to "${windowTitle}"
-        else
-          do script "clear && ${cd} ${escapedCmd}" in window 1
-          set custom title of front window to "${windowTitle}"
-        end if
+        do script "clear && ${cd} ${escapedCmd}"
+        set custom title of front window to "${windowTitle}"
         activate
       end tell'`;
     },

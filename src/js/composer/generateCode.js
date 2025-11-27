@@ -142,5 +142,16 @@ export function generateCode(flow) {
 
 export function generateFlowsCode(flows) {
   const [mainFlow, ...subFlows] = flows;
-  return [...subFlows, mainFlow].map((flow) => generateCode(flow)).join("\n\n");
+
+  // 在编排开始时清除窗口管理器，确保每次编排执行都从新窗口开始
+  // 但在同一编排中的多个脚本可以复用窗口
+  const clearWindowManagerCode = `// 清除终端窗口管理器，确保每次编排执行都从新窗口开始
+if (typeof window !== 'undefined' && window.clearTerminalWindows) {
+  window.clearTerminalWindows();
+}
+`;
+
+  const flowsCode = [...subFlows, mainFlow].map((flow) => generateCode(flow)).join("\n\n");
+
+  return clearWindowManagerCode + "\n" + flowsCode;
 }

@@ -281,6 +281,7 @@ export default {
      * @param options.runInTerminal.windows windows使用的终端，默认wt
      * @param options.runInTerminal.macos macos使用的终端，默认warp
      * @param options.runInTerminal.title 终端窗口标题
+     * @param options.runInTerminal.reuseWindow 是否复用终端窗口（在同一窗口创建新标签页）
      * @param options.waitForCompletion 是否等待终端命令执行完成（仅在runInTerminal模式下有效）
      * @param options.timeout 等待超时时间（毫秒），默认300000（5分钟）
      * @param options.scriptName 脚本名称，用于终端标题（可选）

@@ -23,6 +23,7 @@ window.pinyinMatch = require("pinyin-match");
 window.DOMPurify = DOMPurify;
 
 const createTerminalCommand = require("./lib/createTerminalCommand");
+const terminalWindowManager = require("./lib/terminalWindowManager");
 const shortCodes = require("./lib/shortCodes");
 const { pluginInfo, getUtoolsPlugins } = require("./lib/getUtoolsPlugins");
 const {
@@ -312,6 +313,12 @@ window.generateSignalFilePath = () => {
   const timestamp = Date.now();
   const random = Math.random().toString(36).substring(7);
   return path.join(tempDir, `quickcommand_signal_${timestamp}_${random}.txt`);
+};
+
+// 清除终端窗口管理器
+window.clearTerminalWindows = () => {
+  terminalWindowManager.clearAll();
+  console.log('终端窗口管理器已清除');
 };
 
 window.runCodeFile = (

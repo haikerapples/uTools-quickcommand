@@ -22,6 +22,8 @@
         <q-tooltip v-if="placeholder" max-width="300px">{{
           placeholder
         }}</q-tooltip>
+        <!-- 支持自定义slot内容，如自定义tooltip -->
+        <slot></slot>
       </template>
     </q-btn>
   </div>

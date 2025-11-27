@@ -141,6 +141,24 @@
                 </div>
               </div>
               <CheckButton
+                :model-value="!!argvs.runInTerminal.reuseWindow"
+                @update:modelValue="updateTerminal('reuseWindow', $event)"
+                label="复用终端窗口"
+              >
+                <q-tooltip
+                  anchor="center right"
+                  self="center left"
+                  class="multiline"
+                  max-width="320px"
+                >
+                  <div class="text-weight-medium q-mb-xs">终端窗口复用功能</div>
+                  <div class="q-mb-xs">相同终端的任务将在同一窗口的不同标签页中运行</div>
+                  <div class="text-grey-6 q-mb-xs">✅ 支持：iTerm、Windows Terminal、macOS系统终端</div>
+                  <div class="text-orange-6 q-mb-xs">⚠️ 注意：macOS系统终端需要授予辅助功能权限</div>
+                  <div class="text-grey-5">📍 系统偏好设置 → 安全性与隐私 → 辅助功能 → 添加uTools</div>
+                </q-tooltip>
+              </CheckButton>
+              <CheckButton
                 :model-value="!!argvs.waitForCompletion"
                 @update:modelValue="updateArgvs('waitForCompletion', $event)"
                 label="等待运行完毕"
@@ -206,12 +224,17 @@ export default defineComponent({
     return {
       defaultArgvs: {
         code: "",
-        language: "python",
+        language: "shell",
         args: [],
         scriptCode: null,
         outputCode: null,
-        runInTerminal: null,
-        waitForCompletion: false,
+        runInTerminal: {
+          dir: null, // 将在getDefaultTerminalConfig中初始化
+          windows: "cmd",
+          macos: "iterm",
+          reuseWindow: true,
+        },
+        waitForCompletion: true,
         timeout: 300,
       },
       programs: programs,
@@ -226,9 +249,19 @@ export default defineComponent({
   },
   computed: {
     argvs() {
-      return (
-        this.modelValue.argvs || window.lodashM.cloneDeep(this.defaultArgvs)
-      );
+      if (this.modelValue.argvs) {
+        return this.modelValue.argvs;
+      }
+
+      // 创建默认配置的深拷贝
+      const defaultConfig = window.lodashM.cloneDeep(this.defaultArgvs);
+
+      // 正确初始化 runInTerminal.dir
+      if (defaultConfig.runInTerminal) {
+        defaultConfig.runInTerminal.dir = newVarInputVal("str", "");
+      }
+
+      return defaultConfig;
     },
     isCodeSnippet() {
       return this.modelValue.value === "createCodeSnippet";
@@ -317,7 +350,12 @@ export default defineComponent({
     toggleTerminal(value) {
       const newArgvs = { ...this.argvs };
       newArgvs.runInTerminal = value
-        ? { dir: newVarInputVal("str", "") }
+        ? {
+            dir: newVarInputVal("str", ""),
+            windows: "cmd",
+            macos: "iterm",
+            reuseWindow: true,
+          }
         : null;
       this.updateModelValue(newArgvs);
     },
