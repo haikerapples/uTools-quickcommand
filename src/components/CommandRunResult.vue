@@ -9,8 +9,8 @@
     >
       <q-card
         :style="{
-          maxWidth: fromUtools ? '100%' : '700px',
-          width: fromUtools ? '100%' : '700px',
+          maxWidth: fromUtools ? '100%' : 'min(90vw, 700px)',
+          width: fromUtools ? '100%' : 'min(90vw, 700px)',
           overflow: 'hidden',
         }"
         class="command-run-result"
@@ -50,8 +50,46 @@
           :style="{ maxHeight: maxHeight - headerHeight + 'px' }"
           class="scroll"
         >
+<!-- 任务进度列表 -->
+          <div v-if="showTaskProgress && taskList.length > 0" class="q-pa-md">
+            <div class="text-h6 q-mb-md">任务执行进度</div>
+            <q-list bordered separator>
+              <q-item v-for="task in taskList" :key="task.id">
+                <q-item-section avatar>
+                  <q-icon
+                    :name="
+                      task.status === 'success'
+                        ? 'check_circle'
+                        : task.status === 'error'
+                        ? 'error'
+                        : task.status === 'running'
+                        ? 'pending'
+                        : 'radio_button_unchecked'
+                    "
+                    :color="
+                      task.status === 'success'
+                        ? 'positive'
+                        : task.status === 'error'
+                        ? 'negative'
+                        : task.status === 'running'
+                        ? 'primary'
+                        : 'grey'
+                    "
+                  />
+                </q-item-section>
+                <q-item-section>
+                  <q-item-label>{{ task.label }}</q-item-label>
+                  <q-item-label v-if="task.desc" caption>{{ task.desc }}</q-item-label>
+                  <q-item-label v-if="task.error" caption class="text-negative">
+                    {{ task.error }}
+                  </q-item-label>
+                </q-item-section>
+              </q-item>
+            </q-list>
+          </div>
+<!-- 结果区域 -->
           <ResultArea
-            v-if="isResultShow"
+            v-if="isResultShow && !showTaskProgress"
             @frameLoad="frameLoad"
             :frameInitHeight="frameInitHeight"
             :enableHtml="enableHtml"
@@ -79,9 +117,14 @@ import ResultMenu from "components/popup/ResultMenu.vue";
 import { generateFlowsCode } from "js/composer/generateCode";
 import { dbManager } from "js/utools.js";
 import programs from "js/options/programs.js";
+import { useCommandManager } from "js/commandManager.js";
 
 export default {
   components: { ResultArea, ResultMenu },
+  setup() {
+    const commandManager = useCommandManager();
+    return { commandManager };
+  },
   data() {
     return {
       isResultShow: false,
@@ -99,6 +142,11 @@ export default {
       timeStamp: null,
       urlReg:
         /^((ht|f)tps?):\/\/([\w\-]+(\.[\w\-]+)*\/)*[\w\-]+(\.[\w\-]+)*\/?(\?([\w\-\.,@?^=%&:\/~\+#]*)+)?/,
+      // 任务进度相关
+      showTaskProgress: false,
+      taskList: [],
+      currentCommand: null,
+      taskProgressWindow: null, // 独立任务进度窗口控制器
     };
   },
   computed: {
@@ -109,7 +157,8 @@ export default {
       return !["command", "code", "composer"].includes(this.$route.name);
     },
     maxHeight() {
-      return this.fromUtools ? 600 : 400;
+      // 使用视口高度的百分比，确保在不同窗口大小下都能适配
+      return this.fromUtools ? Math.min(window.innerHeight * 0.9, 600) : Math.min(window.innerHeight * 0.7, 400);
     },
     headerHeight() {
       return this.enableHtml && this.fromUtools ? 0 : 40;
@@ -118,14 +167,46 @@ export default {
       return this.runResult.join("").includes("data:image/");
     },
   },
+watch: {
+    showTaskProgress(newVal) {
+      // 当任务进度显示状态改变时，确保对话框正确显示
+      if (newVal && !this.isResultShow) {
+        this.isResultShow = true;
+      }
+    },
+  },
   methods: {
+    // 关闭任务进度视图
+    closeTaskProgress() {
+      this.showTaskProgress = false;
+      this.taskList = [];
+    },
     // 运行命令
     async runCurrentCommand(currentCommand) {
+      console.log('[TaskProgress] ========== runCurrentCommand START ==========');
+      console.log('[TaskProgress] currentCommand:', currentCommand);
+
       let command = window.lodashM.cloneDeep(currentCommand);
       if (!command.output) command.output = "text";
+
       // 如果是composer命令，则动态生成cmd
       if (command.program === "quickcomposer") {
-        command.cmd = generateFlowsCode(command.flows);
+        console.log('[TaskProgress] This is a composer command');
+        console.log('[TaskProgress] Original command.flows:', command.flows);
+
+        // 恢复完整的命令信息（包括label等属性）
+        const fullCommand = this.commandManager.getFullComposerCommand(command);
+        console.log('[TaskProgress] Full command after restore:', fullCommand);
+        console.log('[TaskProgress] Full command.flows:', fullCommand.flows);
+
+        // 初始化任务列表（使用恢复后的完整命令）
+        this.initTaskList(fullCommand);
+        console.log('[TaskProgress] After initTaskList, showTaskProgress:', this.showTaskProgress);
+        console.log('[TaskProgress] After initTaskList, taskList:', this.taskList);
+
+        // 使用恢复后的flows生成代码
+        command.cmd = generateFlowsCode(fullCommand.flows);
+        console.log('[TaskProgress] Generated code:', command.cmd);
       }
       this.needTempPayload && (await this.getTempPayload(command));
       // 如果命令包含子输入框，则设置子输入框
@@ -293,11 +374,19 @@ export default {
     },
     handleResult(stdout, stderr, options) {
       if (stderr) {
+        // 如果有错误，更新任务状态为失败
+        if (typeof window !== 'undefined' && window.__updateTaskProgress) {
+          window.__updateTaskProgress('error', stderr);
+        }
         return options.earlyExit
           ? alert(stderr)
           : this.showRunResult(stderr, false);
       }
-      !options.action(stdout?.toString()) || this.showRunResult(stdout, true);
+      // 只有在没有任务进度视图的情况下才显示结果
+      // 让任务进度视图保持显示，直到所有任务完成
+      if (!this.showTaskProgress && stdout) {
+        !options.action(stdout?.toString()) || this.showRunResult(stdout, true);
+      }
     },
     // 显示运行结果
     async showRunResult(content, isSuccess) {
@@ -383,6 +472,164 @@ export default {
       this.enableHtml = true;
       this.showRunResult(imgs, true);
     },
+    // 初始化任务列表
+    initTaskList(command) {
+      console.log('[TaskProgress] ========== initTaskList START ==========');
+      console.log('[TaskProgress] command:', JSON.stringify(command, null, 2));
+
+      if (command.program !== "quickcomposer" || !command.flows) {
+        console.log('[TaskProgress] Not a composer command or no flows');
+        console.log('[TaskProgress] program:', command.program);
+        console.log('[TaskProgress] flows:', command.flows);
+        this.showTaskProgress = false;
+        return;
+      }
+
+      // 从flows中提取所有命令节点
+      const mainFlow = command.flows.find(f => f.id === 'main') || command.flows[0];
+      console.log('[TaskProgress] mainFlow:', JSON.stringify(mainFlow, null, 2));
+
+      if (!mainFlow || !mainFlow.commands) {
+        console.log('[TaskProgress] No mainFlow or commands');
+        console.log('[TaskProgress] mainFlow:', mainFlow);
+        this.showTaskProgress = false;
+        return;
+      }
+
+      console.log('[TaskProgress] mainFlow.commands length:', mainFlow.commands.length);
+      console.log('[TaskProgress] mainFlow.commands:', JSON.stringify(mainFlow.commands, null, 2));
+
+      // 构建任务列表
+      this.taskList = mainFlow.commands
+        .filter(cmd => {
+          const isDisabled = cmd.disabled;
+          console.log(`[TaskProgress] Command ${cmd.value} disabled:`, isDisabled);
+          return !isDisabled;
+        })
+        .map((cmd, index) => {
+          console.log(`[TaskProgress] Processing command ${index}:`, JSON.stringify(cmd, null, 2));
+          const task = {
+            id: cmd.id || `task_${index}`,
+            label: cmd.label || cmd.desc || cmd.value || `任务 ${index + 1}`,
+            desc: cmd.summary || (cmd.desc && cmd.desc !== cmd.label ? cmd.desc : ''),
+            status: 'pending', // pending, running, success, error
+            error: null,
+          };
+          console.log(`[TaskProgress] Created task ${index}:`, JSON.stringify(task, null, 2));
+          return task;
+        });
+
+      console.log('[TaskProgress] Final taskList length:', this.taskList.length);
+      console.log('[TaskProgress] Final taskList:', JSON.stringify(this.taskList, null, 2));
+
+      // 检查是否需要显示任务进度
+      const shouldShowProgress = command.features?.showTaskProgress !== false;
+      this.showTaskProgress = this.taskList.length > 0 && shouldShowProgress;
+      console.log('[TaskProgress] shouldShowProgress:', shouldShowProgress);
+      console.log('[TaskProgress] showTaskProgress:', this.showTaskProgress);
+
+      // 显示任务进度
+      if (this.showTaskProgress) {
+        // 注入任务状态更新函数到全局
+        this.injectTaskProgressTracker();
+      }
+      console.log('[TaskProgress] ========== initTaskList END ==========');
+    },
+// 注入任务进度跟踪器
+    injectTaskProgressTracker() {
+      let taskIndex = 0;
+      const self = this;
+
+      // 创建一个全局函数，用于更新任务状态
+      window.__updateTaskProgress = (taskId, status, error = null) => {
+        console.log('[TaskProgress] __updateTaskProgress called:', { taskId, status, error, taskIndex, taskListLength: self.taskList.length });
+
+        // 如果传入了taskId，则根据taskId查找任务
+        if (taskId) {
+          const task = self.taskList.find(t => t.id === taskId);
+          if (task) {
+            task.status = status;
+            if (error) {
+              task.error = error;
+            }
+            console.log('[TaskProgress] Task updated by ID:', task);
+
+            // 重要：当任务成功或失败时，推进taskIndex到下一个未完成的任务
+            if (status === 'success' || status === 'error') {
+              // 找到当前任务的索引
+              const currentTaskIndex = self.taskList.findIndex(t => t.id === taskId);
+              console.log('[TaskProgress] Current task index:', currentTaskIndex);
+
+              // 推进到下一个未完成的任务
+              for (let i = currentTaskIndex + 1; i < self.taskList.length; i++) {
+                if (self.taskList[i].status === 'pending') {
+                  taskIndex = i;
+                  self.taskList[i].status = 'running';
+                  console.log('[TaskProgress] Next task set to running:', self.taskList[i]);
+                  break;
+                }
+              }
+            }
+          } else {
+            console.log('[TaskProgress] Task not found by ID:', taskId);
+          }
+        } else {
+          // 兼容旧的逻辑：使用taskIndex
+          console.log('[TaskProgress] Using taskIndex fallback, current index:', taskIndex);
+          if (taskIndex < self.taskList.length) {
+            self.taskList[taskIndex].status = status;
+            if (error) {
+              self.taskList[taskIndex].error = error;
+            }
+            console.log('[TaskProgress] Task updated by index:', self.taskList[taskIndex]);
+
+            if (status === 'success' || status === 'error') {
+              taskIndex++;
+              // 如果还有下一个任务，设置为运行中
+              if (taskIndex < self.taskList.length) {
+                self.taskList[taskIndex].status = 'running';
+                console.log('[TaskProgress] Next task set to running:', self.taskList[taskIndex]);
+              }
+            }
+          }
+        }
+
+        // Vue 3响应式更新：创建新的数组引用触发更新
+        self.taskList = [...self.taskList];
+        console.log('[TaskProgress] taskList updated, triggering reactivity');
+
+        // 检查是否所有任务都已完成
+        const allTasksCompleted = self.taskList.every(task =>
+          task.status === 'success' || task.status === 'error'
+        );
+
+        if (allTasksCompleted && self.showTaskProgress) {
+          console.log('[TaskProgress] All tasks completed, keeping task progress view visible');
+          // 不再自动隐藏进度视图，让用户可以查看完整的执行结果
+        }
+      };
+
+      // 设置第一个任务为运行中
+      if (this.taskList.length > 0) {
+        // 找到第一个pending状态的任务设置为running
+        const firstPendingTask = this.taskList.find(task => task.status === 'pending');
+        if (firstPendingTask) {
+          firstPendingTask.status = 'running';
+          console.log('[TaskProgress] First pending task set to running:', firstPendingTask);
+        } else {
+          // 如果没有pending任务，设置第一个任务为running
+          this.taskList[0].status = 'running';
+          console.log('[TaskProgress] First task set to running (fallback):', this.taskList[0]);
+        }
+
+        // 重要：立即设置所有后续任务为pending，确保状态一致性
+        for (let i = 1; i < this.taskList.length; i++) {
+          if (this.taskList[i].status !== 'running') {
+            this.taskList[i].status = 'pending';
+          }
+        }
+      }
+    },
   },
   unmounted() {
     this.stopRun();
@@ -393,5 +640,18 @@ export default {
 <style scoped>
 .command-run-result {
   background-color: var(--utools-bg-color);
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.command-run-result > div {
+  background-color: var(--utools-bg-color);
+}
+
+.scroll {
+  background-color: var(--utools-bg-color);
+  flex: 1;
+  overflow-y: auto;
 }
 </style>

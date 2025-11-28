@@ -43,10 +43,18 @@ export function generateCode(flow) {
     code.push(indent + getVarAssignCode(v.name, v.value) + comma);
   });
 
-  commands.forEach((cmd) => {
+  commands.forEach((cmd, cmdIndex) => {
     // 跳过禁用的命令
     if (cmd.disabled) return;
     if (!cmd.code) return;
+
+// 添加任务开始标记
+    code.push(indent + `// 任务 ${cmdIndex + 1}: ${cmd.label || cmd.desc || ''}`);
+    code.push(indent + `console.log('[Composer] Starting task ${cmdIndex + 1} with ID: ${cmd.id || `task_${cmdIndex}`}')${comma}`);
+    code.push(indent + `console.log('[Composer] About to call __updateTaskProgress for task ${cmdIndex + 1}')${comma}`);
+    code.push(indent + `console.log('[Composer] __updateTaskProgress exists:', typeof __updateTaskProgress !== 'undefined')${comma}`);
+    code.push(indent + `typeof __updateTaskProgress !== 'undefined' && __updateTaskProgress('${cmd.id || `task_${cmdIndex}`}', 'running')${comma}`);
+    code.push(indent + `console.log('[Composer] Called __updateTaskProgress for task ${cmdIndex + 1}')${comma}`);
 
     let cmdCode = cmd.code;
     // 处理输出变量
@@ -58,7 +66,7 @@ export function generateCode(flow) {
         if (cmd.callbackFunc) {
           // 如果回调函数存在，则使用回调函数模式，否则保持原样
           if (!details) {
-            cmdCode = `${cmdCode}.then(${cmd.callbackFunc})`;
+cmdCode = `${cmdCode}.then(${cmd.callbackFunc}).then(() => { typeof __updateTaskProgress !== 'undefined' && __updateTaskProgress('${cmd.id || `task_${cmdIndex}`}', 'success'); })`;
           } else {
             // 如果输出变量有详细变量，则需要为每个变量赋值
             const promiseName = name || "__result";
@@ -75,18 +83,55 @@ export function generateCode(flow) {
             const funcParams =
               (name ? `${name},` : "") + Object.values(details).join(",");
 
-            cmdCode = `${cmdCode}.then((${promiseName})=>{
+cmdCode = `${cmdCode}.then((${promiseName})=>{
               ${extractVarCode}
               ${funcName}(${funcParams})
+              console.log('[Composer] Task ${cmdIndex + 1} completed successfully');
+              typeof __updateTaskProgress !== 'undefined' && __updateTaskProgress('${cmd.id || `task_${cmdIndex}`}', 'success');
               })`;
           }
+        } else {
+// 没有回调函数，直接添加成功标记
+          cmdCode = `${cmdCode}.then(() => { console.log('[Composer] Task ${cmdIndex + 1} completed successfully'); typeof __updateTaskProgress !== 'undefined' && __updateTaskProgress('${cmd.id || `task_${cmdIndex}`}', 'success'); })`;
         }
         code.push(indent + cmdCode + comma);
       } else if (cmd.asyncMode === "await") {
-        // 使用 await 模式
+        // 使用 await 模式 - 需要特殊处理信号文件同步
         const promiseName = name || "__result";
-        cmdCode = getVarAssignCode(promiseName, `await ${cmdCode}`);
-        code.push(indent + cmdCode + comma);
+
+        // 检查是否是quickcommand.runCode调用
+        if (cmdCode.includes('quickcommand.runCode')) {
+          // 提取runCode调用的参数
+          const runCodeMatch = cmdCode.match(/quickcommand\.runCode\s*\(([^]*?)\s*,\s*({[^]*?})\s*\)/);
+          if (runCodeMatch) {
+            const [fullMatch, scriptCode, optionsStr] = runCodeMatch;
+
+            // 确保waitForCompletion被设置为true
+            let modifiedOptions = optionsStr;
+            if (!modifiedOptions.includes('waitForCompletion:true')) {
+              // 如果options中没有waitForCompletion，添加它
+              if (modifiedOptions.endsWith('}')) {
+                modifiedOptions = modifiedOptions.slice(0, -1) + ', waitForCompletion: true}';
+              } else {
+                modifiedOptions = modifiedOptions + ', waitForCompletion: true';
+              }
+            }
+
+            // 使用修改后的选项重新构建runCode调用
+            const modifiedRunCode = `quickcommand.runCode(${scriptCode}, ${modifiedOptions})`;
+            cmdCode = getVarAssignCode(promiseName, `await ${modifiedRunCode}`);
+            code.push(indent + cmdCode + comma);
+          } else {
+            // 无法解析的runCode调用，使用原始逻辑
+            cmdCode = getVarAssignCode(promiseName, `await ${cmdCode}`);
+            code.push(indent + cmdCode + comma);
+          }
+        } else {
+          // 非runCode调用，使用原始逻辑
+          cmdCode = getVarAssignCode(promiseName, `await ${cmdCode}`);
+          code.push(indent + cmdCode + comma);
+        }
+
         // 处理详细变量
         if (details) {
           Object.entries(details).forEach(([path, varName]) => {
@@ -100,6 +145,11 @@ export function generateCode(flow) {
             );
           });
         }
+// 添加任务完成标记（await命令）
+        code.push(indent + `console.log('[Composer] Task ${cmdIndex + 1} completed successfully')${comma}`);
+        code.push(indent + `console.log('[Composer] About to call __updateTaskProgress success for task ${cmdIndex + 1}')${comma}`);
+        code.push(indent + `typeof __updateTaskProgress !== 'undefined' && __updateTaskProgress('${cmd.id || `task_${cmdIndex}`}', 'success')${comma}`);
+        code.push(indent + `console.log('[Composer] Called __updateTaskProgress success for task ${cmdIndex + 1}')${comma}`);
       } else {
         // 非Async命令
         const resultVarName = name || "__result";
@@ -118,19 +168,28 @@ export function generateCode(flow) {
             );
           });
         }
-        return;
+// 添加任务完成标记（非async命令）
+        code.push(indent + `console.log('[Composer] Task ${cmdIndex + 1} completed successfully')${comma}`);
+        code.push(indent + `console.log('[Composer] About to call __updateTaskProgress success for task ${cmdIndex + 1}')${comma}`);
+        code.push(indent + `typeof __updateTaskProgress !== 'undefined' && __updateTaskProgress('${cmd.id || `task_${cmdIndex}`}', 'success')${comma}`);
+        code.push(indent + `console.log('[Composer] Called __updateTaskProgress success for task ${cmdIndex + 1}')${comma}`);
       }
     } else {
       if (cmd.asyncMode === "await") {
         cmdCode = `await ${cmdCode}`;
       }
       code.push(indent + cmdCode + (cmd.isControlFlow ? "" : comma));
+// 非Async命令，添加任务完成标记
+        code.push(indent + `console.log('[Composer] Task ${cmdIndex + 1} completed successfully')${comma}`);
+        code.push(indent + `console.log('[Composer] About to call __updateTaskProgress success for task ${cmdIndex + 1}')${comma}`);
+        code.push(indent + `typeof __updateTaskProgress !== 'undefined' && __updateTaskProgress('${cmd.id || `task_${cmdIndex}`}', 'success')${comma}`);
+        code.push(indent + `console.log('[Composer] Called __updateTaskProgress success for task ${cmdIndex + 1}')${comma}`);
     }
   });
 
   code.push("};"); // Close the function
 
-  // 如果是主函数，则自动执行
+// 如果是主函数，则自动执行
   if (funcName === "main") {
     code.push("\nmain();"); // Call the main function
   }

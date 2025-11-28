@@ -50,6 +50,8 @@ window.showUb = require("./lib/showDocs");
 window.getQuickcommandTempFile =
   require("./lib/getQuickcommandFile").getQuickcommandTempFile;
 
+// 任务进度窗口服务已移除，改为在组件内部展示
+
 window.getSharedQcById = async (id) => {
   const url = "https://qc.qaz.ink/home/quick/script/getScript";
   const timeStamp = parseInt(new Date().getTime() / 1000);
@@ -163,7 +165,9 @@ let liteErr = (e) => {
 // vm 模块将无法在渲染进程中使用，改用 ses 来执行代码
 window.evalCodeInSandbox = (code, addVars = {}) => {
   let sandboxWithAD = Object.assign(addVars, getSandboxFuns());
-  sandboxWithAD.quickcommand = window.lodashM.cloneDeep(quickcommand);
+  // 使用完整的window.quickcommand（包含Vue组件添加的runCode函数）
+  // 注意：window.quickcommand可能已经被Vue组件扩展，包含runCode函数
+  sandboxWithAD.quickcommand = window.quickcommand;
   try {
     return new Compartment(sandboxWithAD).evaluate(code);
   } catch (error) {
@@ -174,41 +178,281 @@ window.evalCodeInSandbox = (code, addVars = {}) => {
 let isWatchingError = false;
 window.runCodeInSandbox = (code, callback, addVars = {}) => {
   let sandbox = getSandboxFuns();
-  sandbox.console = {
+  let hasAsyncOperations = false;
+  let pendingCallbacks = 0;
+  let finalCallbackCalled = false;
+
+  // 包装回调函数，确保只调用一次
+  let finalCallback = (stdout, stderr) => {
+    if (!finalCallbackCalled) {
+      finalCallbackCalled = true;
+      callback(stdout, stderr);
+    }
+  };
+
+  // 保存原始函数引用
+
+
+  // 使用完整的window.quickcommand（包含Vue组件添加的runCode函数）
+  // 注意：window.quickcommand可能已经被Vue组件扩展，包含runCode函数
+  sandbox.quickcommand = window.quickcommand;
+
+// 检查异步操作是否完成
+  let checkAsyncComplete = () => {
+    if (hasAsyncOperations && pendingCallbacks <= 0 && !finalCallbackCalled) {
+      console.log('[runCodeInSandbox] All async operations completed, calling manual cleanup');
+      // 延迟清理拦截器，确保所有UI更新完成
+      setTimeout(() => {
+        manualCleanup();
+        // 然后调用原始回调通知完成
+        finalCallback(null, null);
+      }, 100);
+    }
+  };
+
+// 清理函数：恢复原始函数
+  let cleanup = () => {
+    console.log('[runCodeInSandbox] Cleaning up...');
+
+    // 恢复原始的window.__updateTaskProgress
+    if (originalUpdateTaskProgress) {
+      window.__updateTaskProgress = originalUpdateTaskProgress;
+      console.log('[runCodeInSandbox] Original window.__updateTaskProgress restored');
+    }
+  };
+
+  // 包装finalCallback，确保每次调用都执行清理
+  let wrappedFinalCallback = (result, error) => {
+    if (!finalCallbackCalled) {
+      finalCallbackCalled = true;
+      cleanup();
+      finalCallback(result, error);
+    }
+  };
+
+  // 检查是否应该立即清理（仅用于同步代码的情况）
+  let shouldCleanupImmediately = false;
+
+  // 用于手动清理的函数（在异步操作真正完成时调用）
+  let manualCleanup = () => {
+    if (!finalCallbackCalled) {
+      console.log('[runCodeInSandbox] Manual cleanup triggered...');
+      cleanup();
+    }
+  };
+
+// 直接替换window.__updateTaskProgress为我们的拦截器
+  const originalUpdateTaskProgress = window.__updateTaskProgress;
+  window.__updateTaskProgress = (taskId, status, error = null) => {
+    console.log('[runCodeInSandbox] __updateTaskProgress intercepted:', { taskId, status, error });
+    console.log('[runCodeInSandbox] Call stack:', new Error().stack);
+
+    // 跟踪任务状态
+    if (status === 'running') {
+      pendingCallbacks++;
+      hasAsyncOperations = true;
+      console.log('[runCodeInSandbox] Task started, pendingCallbacks:', pendingCallbacks);
+    } else if (status === 'success' || status === 'error') {
+      // 只有在有对应的running状态时才减少计数
+      if (pendingCallbacks > 0) {
+        pendingCallbacks--;
+      }
+      console.log('[runCodeInSandbox] Task completed, pendingCallbacks:', pendingCallbacks);
+      checkAsyncComplete();
+    }
+
+    // 调用原始函数更新UI
+    if (originalUpdateTaskProgress && typeof originalUpdateTaskProgress === 'function') {
+      console.log('[runCodeInSandbox] Calling original function...');
+      originalUpdateTaskProgress(taskId, status, error);
+    } else {
+      console.log('[runCodeInSandbox] Original function not available');
+    }
+  };
+
+  console.log('[runCodeInSandbox] window.__updateTaskProgress replaced with interceptor');
+
+sandbox.console = {
     log: (...stdout) => {
       console.log("Result:", stdout);
-      callback(stdout, null);
+      // 在异步模式下，不立即调用wrappedFinalCallback，让异步操作自然完成
+      if (!hasAsyncOperations) {
+        wrappedFinalCallback(stdout, null);
+      }
     },
     error: (...stderr) => {
-      callback(null, stderr);
+      if (!hasAsyncOperations) {
+        wrappedFinalCallback(null, stderr);
+      } else {
+        console.error("Sandbox error:", stderr);
+      }
     },
     clear: () => {
-      callback({ __clearQuickcommandRunResult: true }, null);
+      if (!hasAsyncOperations) {
+        wrappedFinalCallback({ __clearQuickcommandRunResult: true }, null);
+      }
     },
   };
-  let sandboxWithAD = Object.assign(addVars, sandbox);
-  sandboxWithAD.quickcommand = window.lodashM.cloneDeep(quickcommand);
+
+let sandboxWithAD = Object.assign(addVars, sandbox);
+  // 使用完整的window.quickcommand（包含Vue组件添加的runCode函数）
+  sandboxWithAD.quickcommand = window.quickcommand;
+
+  // 将__updateTaskProgress拦截器添加到sandbox中，确保Compartment内部能访问
+  sandboxWithAD.__updateTaskProgress = window.__updateTaskProgress;
+
+  // 调试：检查quickcommand.runCode是否存在
+  console.log('[runCodeInSandbox] window.quickcommand:', window.quickcommand);
+  console.log('[runCodeInSandbox] window.quickcommand.runCode:', window.quickcommand?.runCode);
   if (addVars.enterData) {
     sandboxWithAD.quickcommand.enterData = addVars.enterData;
     sandboxWithAD.quickcommand.payload = addVars.enterData.payload;
   }
-  try {
-    new Compartment(sandboxWithAD).evaluate(code);
+
+// 直接检测代码是否包含异步模式，而不依赖运行时包装
+  // 对于quickcomposer生成的代码，如果有async函数或await调用，就认为是异步操作
+  const hasAsyncKeywords = code.includes('async function') ||
+                           code.includes('await ') ||
+                           code.includes('quickcommand.runCode');
+
+  if (hasAsyncKeywords) {
+    console.log('[runCodeInSandbox] Async operations detected in code (keywords: async/await/quickcommand.runCode)');
+    hasAsyncOperations = true;
+  } else {
+    console.log('[runCodeInSandbox] No async keywords detected in code');
+  }
+
+try {
+    const result = new Compartment(sandboxWithAD).evaluate(code);
+
+    // 代码执行后，首先检查evaluate的返回结果是否是Promise
+    if (hasAsyncOperations) {
+      // 首先检查evaluate的返回结果是否是Promise
+if (result && typeof result.then === 'function') {
+        console.log('[runCodeInSandbox] Got Promise from evaluate(), waiting for completion...');
+        console.log('[runCodeInSandbox] Promise object:', result);
+result.then(
+          (value) => {
+            console.log('[runCodeInSandbox] Promise resolved with:', value);
+            if (!finalCallbackCalled) {
+              manualCleanup(); // 异步操作完成后手动清理
+              finalCallbackCalled = true;
+              finalCallback(value, null);
+            }
+          },
+          (error) => {
+            console.log('[runCodeInSandbox] Promise rejected with:', error);
+            console.log('[runCodeInSandbox] Promise rejection stack:', error?.stack);
+            if (!finalCallbackCalled) {
+              manualCleanup(); // 异步操作完成后手动清理
+              finalCallbackCalled = true;
+              finalCallback(null, error);
+            }
+          }
+        );
+
+        // 添加超时保护，防止Promise永远不resolve
+        setTimeout(() => {
+          if (!finalCallbackCalled) {
+            console.log('[runCodeInSandbox] Promise timeout after 60 seconds, forcing callback');
+            wrappedFinalCallback(null, new Error('Promise timeout'));
+          }
+        }, 60000);
+      } else if (sandboxWithAD.globalThis && sandboxWithAD.globalThis.main) {
+        // 如果evaluate结果不是Promise，检查是否有main函数需要调用
+        const mainFunc = sandboxWithAD.globalThis.main;
+        if (typeof mainFunc === 'function') {
+          console.log('[runCodeInSandbox] Found main function, calling it to capture Promise...');
+          try {
+            const promiseResult = mainFunc();
+            // 如果返回Promise，等待其完成
+            if (promiseResult && typeof promiseResult.then === 'function') {
+              console.log('[runCodeInSandbox] Got Promise from main(), waiting for completion...');
+promiseResult.then(
+                (value) => {
+                  console.log('[runCodeInSandbox] Promise resolved with:', value);
+                  if (!finalCallbackCalled) {
+                    manualCleanup(); // 异步操作完成后手动清理
+                    finalCallbackCalled = true;
+                    finalCallback(value, null);
+                  }
+                },
+                (error) => {
+                  console.log('[runCodeInSandbox] Promise rejected with:', error);
+                  if (!finalCallbackCalled) {
+                    manualCleanup(); // 异步操作完成后手动清理
+                    finalCallbackCalled = true;
+                    finalCallback(null, error);
+                  }
+                }
+              );
+} else {
+              // 没有返回Promise，手动清理
+              console.log('[runCodeInSandbox] main() did not return Promise, performing manual cleanup');
+              setTimeout(() => {
+                if (!finalCallbackCalled) {
+                  manualCleanup(); // 手动清理
+                  finalCallbackCalled = true;
+                  finalCallback(promiseResult, null);
+                }
+              }, 200);
+            }
+} catch (mainError) {
+            console.log('[runCodeInSandbox] Error calling main():', mainError);
+            if (!finalCallbackCalled) {
+              wrappedFinalCallback(null, mainError);
+            }
+          }
+} else {
+          console.log('[runCodeInSandbox] main is not a function, performing manual cleanup');
+          setTimeout(() => {
+            if (!finalCallbackCalled) {
+              manualCleanup(); // 手动清理
+              finalCallbackCalled = true;
+              finalCallback(result, null);
+            }
+          }, 200);
+        }
+      } else {
+// 异步代码但没有Promise或main函数，使用超时机制
+        console.log('[runCodeInSandbox] Async code detected but no Promise or main function found, using fallback timeout');
+        setTimeout(() => {
+          if (!finalCallbackCalled) {
+            manualCleanup(); // 超时时手动清理
+            finalCallbackCalled = true;
+            finalCallback(result, null);
+          }
+        }, 30000); // 30秒超时
+      }
+} else {
+      // 同步代码，立即清理并延迟回调
+      console.log('[runCodeInSandbox] Synchronous code, performing immediate cleanup');
+      cleanup(); // 同步代码立即清理
+      setTimeout(() => {
+        if (!finalCallbackCalled) {
+          finalCallbackCalled = true;
+          finalCallback(result, null);
+        }
+      }, 200);
+    }
+
+// 异步处理已在上面完成
   } catch (e) {
     console.log("Error: ", e);
-    callback(null, liteErr(e));
+    wrappedFinalCallback(null, liteErr(e));
   }
+
   // 自动捕捉错误
   let cbUnhandledError = (e) => {
     removeAllListener();
     console.log("UnhandledError: ", e);
-    callback(null, liteErr(e));
+    wrappedFinalCallback(null, liteErr(e));
   };
 
   let cbUnhandledRejection = (e) => {
     removeAllListener();
     console.log("UnhandledRejection: ", e);
-    callback(null, liteErr(e.reason));
+    wrappedFinalCallback(null, liteErr(e.reason));
   };
 
   let removeAllListener = () => {
@@ -280,25 +524,37 @@ const handleProcessOutput = (child, charset, callback, realTime) => {
 
 // 等待信号文件的辅助函数
 window.waitForSignalFile = (signalFilePath, timeout = 300000) => {
+  console.log('[waitForSignalFile] Waiting for signal file:', signalFilePath);
+  console.log('[waitForSignalFile] Temp directory:', utools.getPath('temp'));
+  console.log('[waitForSignalFile] File exists at start:', fs.existsSync(signalFilePath));
+
   return new Promise((resolve, reject) => {
     const startTime = Date.now();
     const checkInterval = 500; // 每500ms检查一次
 
     const checkFile = () => {
+      const elapsed = Date.now() - startTime;
       if (fs.existsSync(signalFilePath)) {
+        console.log(`[waitForSignalFile] Signal file found after ${elapsed}ms!`);
         // 文件存在，删除它并resolve
         try {
           fs.unlinkSync(signalFilePath);
+          console.log('[waitForSignalFile] Signal file deleted successfully');
           resolve(true);
         } catch (err) {
           console.error('删除信号文件失败:', err);
           resolve(true); // 即使删除失败也继续
         }
-      } else if (Date.now() - startTime > timeout) {
+      } else if (elapsed > timeout) {
         // 超时
+        console.error(`[waitForSignalFile] Timeout after ${timeout}ms, file never created`);
+        console.log('[waitForSignalFile] Temp directory contents:', fs.readdirSync(utools.getPath('temp')));
         reject(new Error(`等待脚本执行完成超时（${timeout}ms）`));
       } else {
         // 继续等待
+        if (elapsed % 5000 < 500) { // 每5秒输出一次进度
+          console.log(`[waitForSignalFile] Still waiting... ${elapsed}ms elapsed`);
+        }
         setTimeout(checkFile, checkInterval);
       }
     };
@@ -312,7 +568,10 @@ window.generateSignalFilePath = () => {
   const tempDir = utools.getPath('temp');
   const timestamp = Date.now();
   const random = Math.random().toString(36).substring(7);
-  return path.join(tempDir, `quickcommand_signal_${timestamp}_${random}.txt`);
+  const signalPath = path.join(tempDir, `quickcommand_signal_${timestamp}_${random}.txt`);
+  console.log('[generateSignalFilePath] Generated path:', signalPath);
+  console.log('[generateSignalFilePath] Temp directory:', tempDir);
+  return signalPath;
 };
 
 // 清除终端窗口管理器

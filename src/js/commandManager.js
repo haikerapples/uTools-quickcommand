@@ -338,15 +338,22 @@ export function useCommandManager() {
       ...flow,
       commands: flow.commands.map((cmd) => {
         // 恢复所有属性
-        const command = findCommandByValue(cmd.value);
-        return {
-          ...command,
+        const fullCommand = findCommandByValue(cmd.value);
+        console.log(`[CommandManager] findCommandByValue(${cmd.value}):`, fullCommand);
+        if (!fullCommand) {
+          console.warn(`[CommandManager] Command definition not found for value: ${cmd.value}`);
+          return cmd;
+        }
+        const restoredCmd = {
+          ...fullCommand,
           ...cmd,
         };
+        console.log(`[CommandManager] Restored command:`, restoredCmd);
+        return restoredCmd;
       }),
     }));
     return {
-      ...command,
+      ...newCommand,
       flows: newFlows,
     };
   };

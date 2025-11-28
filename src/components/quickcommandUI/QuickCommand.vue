@@ -338,10 +338,12 @@ export default {
         if (runInTerminalOptions && waitForCompletion) {
           signalFilePath = window.generateSignalFilePath();
 
-          // 根据不同语言添加创建信号文件的命令
+// 根据不同语言添加创建信号文件的命令
           if (language === 'shell' || language === 'bash' || language === 'zsh') {
             // Unix shell
             modifiedCode = `${code}\necho "done" > "${signalFilePath}"`;
+            console.log('[quickcommand.runCode] Shell code modified for signal file:', signalFilePath);
+            console.log('[quickcommand.runCode] Modified code:', modifiedCode);
           } else if (language === 'cmd') {
             // Windows cmd
             modifiedCode = `${code}\necho done > "${signalFilePath}"`;

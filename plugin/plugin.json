@@ -6,7 +6,7 @@
   "publishPage": "https://github.com/haikerapples/uTools-quickcommand",
   "version": "1.0.0",
   "development": {
-    "main": "http://127.0.0.1:8080/"
+    "main": "index.html"
   },
   "author": "haikerapples",
   "logo": "logo.png",

@@ -143,6 +143,20 @@
           height="30px"
         />
       </div>
+
+      <!-- 任务进度显示（仅可视化编排） -->
+      <div class="config-section" v-if="from === 'quickcomposer'">
+        <div class="section-title">
+          <q-icon name="timeline" size="16px" />
+          <span class="q-ml-sm">任务进度显示</span>
+        </div>
+        <ButtonGroup
+          :model-value="currentCommand.features.showTaskProgress !== false"
+          :options="taskProgressOptions"
+          @update:model-value="handleTaskProgressChange"
+          height="26px"
+        />
+      </div>
     </div>
 
     <!-- 图标选择对话框 -->
@@ -202,6 +216,10 @@ export default defineComponent({
       searchPushOptions: [
         { value: false, label: "禁用（进入插件后才执行命令）" },
         { value: true, label: "启用（在uTools主搜索框直接执行命令）" },
+      ],
+      taskProgressOptions: [
+        { value: true, label: "显示（在独立窗口显示任务执行进度）" },
+        { value: false, label: "隐藏（不显示任务进度窗口）" },
       ],
     };
   },
@@ -295,6 +313,9 @@ export default defineComponent({
     handlePlatformChange(newPlatform) {
       if (newPlatform.length === 0) return;
       this.updateModelValue("features.platform", newPlatform);
+    },
+    handleTaskProgressChange(showProgress) {
+      this.updateModelValue("features.showTaskProgress", showProgress);
     },
     updateExpanded(value) {
       this.isExpanded = value;
