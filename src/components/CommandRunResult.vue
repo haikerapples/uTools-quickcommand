@@ -52,9 +52,21 @@
         >
 <!-- 任务进度列表 -->
           <div v-if="showTaskProgress && taskList.length > 0" class="q-pa-md">
-            <div class="text-h6 q-mb-md">任务执行进度</div>
+            <div class="text-h6 q-mb-md flex items-center justify-between">
+              <span>任务执行进度</span>
+              <q-chip
+                v-if="totalDuration !== null"
+                color="primary"
+                text-color="white"
+                size="sm"
+                class="total-duration-chip"
+              >
+                <q-icon name="timer" size="xs" class="q-mr-xs" />
+                总耗时: {{ formatDuration(totalDuration) }}
+              </q-chip>
+            </div>
             <q-list bordered separator>
-              <q-item v-for="task in taskList" :key="task.id">
+              <q-item v-for="task in taskList" :key="task.id" class="task-item">
                 <q-item-section avatar>
                   <q-icon
                     :name="
@@ -78,9 +90,40 @@
                   />
                 </q-item-section>
                 <q-item-section>
-                  <q-item-label>{{ task.label }}</q-item-label>
-                  <q-item-label v-if="task.desc" caption>{{ task.desc }}</q-item-label>
-                  <q-item-label v-if="task.error" caption class="text-negative">
+                  <!-- 主标题行：程序类型 + 原始标签 -->
+                  <q-item-label class="task-title-row">
+                    <q-chip
+                      v-if="task.programInfo"
+                      :color="task.programInfo.color"
+                      text-color="white"
+                      size="sm"
+                      class="task-program-chip"
+                    >
+                      {{ task.programInfo.shortName || task.programInfo.name }}
+                    </q-chip>
+                    <span class="task-original-title">{{ task.originalLabel }}</span>
+                  </q-item-label>
+
+                  <!-- 用户自定义标题 -->
+                  <q-item-label v-if="task.customTitle" class="task-custom-title">
+                    {{ task.customTitle }}
+                  </q-item-label>
+
+                  <!-- 描述信息 -->
+                  <q-item-label v-if="task.desc" caption class="task-desc">
+                    {{ task.desc }}
+                  </q-item-label>
+
+                  <!-- 执行时间信息 -->
+                  <q-item-label v-if="task.duration !== null || (task.status === 'running' && task.startTime)" caption class="task-duration">
+                    <q-icon name="schedule" size="xs" class="q-mr-xs" />
+                    {{ task.duration !== null ? formatDuration(task.duration) : formatDuration(getCurrentRunningTime(task)) }}
+                    <span v-if="task.status === 'running'" class="running-indicator">...</span>
+                  </q-item-label>
+
+                  <!-- 错误信息 -->
+                  <q-item-label v-if="task.error" caption class="text-negative task-error">
+                    <q-icon name="error" size="xs" class="q-mr-xs" />
                     {{ task.error }}
                   </q-item-label>
                 </q-item-section>
@@ -89,7 +132,7 @@
           </div>
 <!-- 结果区域 -->
           <ResultArea
-            v-if="isResultShow && !showTaskProgress"
+            v-if="!showTaskProgress"
             @frameLoad="frameLoad"
             :frameInitHeight="frameInitHeight"
             :enableHtml="enableHtml"
@@ -147,6 +190,10 @@ export default {
       taskList: [],
       currentCommand: null,
       taskProgressWindow: null, // 独立任务进度窗口控制器
+      totalDuration: null, // 总执行耗时
+      taskStartTime: null, // 所有任务开始时间
+      taskEndTime: null, // 所有任务结束时间
+      realTimeUpdateTimer: null, // 实时更新定时器
     };
   },
   computed: {
@@ -437,6 +484,11 @@ watch: {
       }
       this.clear();
       this.frameInitHeight = 0;
+
+      // 清理任务进度相关资源
+      this.stopRealTimeUpdate();
+      // 注意：不清除showTaskProgress、taskList和totalDuration，让用户能看到最终结果
+      // 只有在新的任务开始时才会重置这些值
     },
     clear() {
       !!this.ctrlCListener &&
@@ -477,6 +529,10 @@ watch: {
       console.log('[TaskProgress] ========== initTaskList START ==========');
       console.log('[TaskProgress] command:', JSON.stringify(command, null, 2));
 
+      // 清理之前的任务数据
+      this.taskList = [];
+      this.stopRealTimeUpdate();
+
       if (command.program !== "quickcomposer" || !command.flows) {
         console.log('[TaskProgress] Not a composer command or no flows');
         console.log('[TaskProgress] program:', command.program);
@@ -510,10 +566,17 @@ watch: {
           console.log(`[TaskProgress] Processing command ${index}:`, JSON.stringify(cmd, null, 2));
           const task = {
             id: cmd.id || `task_${index}`,
-            label: cmd.label || cmd.desc || cmd.value || `任务 ${index + 1}`,
+            originalLabel: cmd.label || cmd.desc || cmd.value || `任务 ${index + 1}`,
+            customTitle: cmd.userComments || null,
             desc: cmd.summary || (cmd.desc && cmd.desc !== cmd.label ? cmd.desc : ''),
             status: 'pending', // pending, running, success, error
             error: null,
+            // 程序信息
+            programInfo: this.getProgramInfo(cmd.program),
+            // 执行时间相关
+            startTime: null,
+            endTime: null,
+            duration: null, // 执行耗时（毫秒）
           };
           console.log(`[TaskProgress] Created task ${index}:`, JSON.stringify(task, null, 2));
           return task;
@@ -530,18 +593,140 @@ watch: {
 
       // 显示任务进度
       if (this.showTaskProgress) {
+        // 记录任务总开始时间
+        this.taskStartTime = Date.now();
+        this.taskEndTime = null;
+        this.totalDuration = null;
+
         // 注入任务状态更新函数到全局
         this.injectTaskProgressTracker();
+
+        // 开始实时更新
+        this.startRealTimeUpdate();
       }
       console.log('[TaskProgress] ========== initTaskList END ==========');
     },
-// 注入任务进度跟踪器
+    // 获取程序信息
+    getProgramInfo(programName) {
+      if (!programName) return null;
+      return programs[programName] || null;
+    },
+
+    // 格式化执行时间
+    formatDuration(duration) {
+      if (duration === null || duration === undefined) return '';
+
+      if (duration < 1000) {
+        return `${duration}ms`;
+      } else if (duration < 60000) {
+        return `${(duration / 1000).toFixed(1)}s`;
+      } else {
+        const minutes = Math.floor(duration / 60000);
+        const seconds = Math.floor((duration % 60000) / 1000);
+        return `${minutes}m ${seconds}s`;
+      }
+    },
+
+    // 获取当前运行时间（用于实时显示）
+    getCurrentRunningTime(task) {
+      if (!task.startTime || task.status !== 'running') return 0;
+      return Date.now() - task.startTime;
+    },
+
+    // 计算总耗时
+    calculateTotalDuration() {
+      if (!this.taskStartTime) return null;
+
+      // 如果所有任务都完成了，使用最后完成的时间
+      const allCompleted = this.taskList.every(task =>
+        task.status === 'success' || task.status === 'error'
+      );
+
+      if (allCompleted) {
+        // 如果已经记录了结束时间，使用它
+        if (this.taskEndTime) {
+          return this.taskEndTime - this.taskStartTime;
+        }
+
+        // 否则，找到最后一个完成的任务的结束时间
+        const lastEndTime = Math.max(...this.taskList.map(task => task.endTime || 0));
+        if (lastEndTime > 0) {
+          return lastEndTime - this.taskStartTime;
+        }
+      }
+
+      // 如果还有任务在运行，返回当前时间差
+      const hasRunning = this.taskList.some(task => task.status === 'running');
+      if (hasRunning) {
+        return Date.now() - this.taskStartTime;
+      }
+
+      return null;
+    },
+
+    // 开始实时更新定时器
+    startRealTimeUpdate() {
+      if (this.realTimeUpdateTimer) {
+        clearInterval(this.realTimeUpdateTimer);
+      }
+
+      this.realTimeUpdateTimer = setInterval(() => {
+        // 更新总耗时
+        this.totalDuration = this.calculateTotalDuration();
+
+        // 强制更新视图（Vue的响应式更新）
+        this.$forceUpdate();
+      }, 100); // 每100ms更新一次
+    },
+
+    // 停止实时更新定时器
+    stopRealTimeUpdate() {
+      if (this.realTimeUpdateTimer) {
+        clearInterval(this.realTimeUpdateTimer);
+        this.realTimeUpdateTimer = null;
+      }
+    },
+
+    // 注入任务进度跟踪器
     injectTaskProgressTracker() {
       let taskIndex = 0;
       const self = this;
 
       // 创建一个全局函数，用于更新任务状态
       window.__updateTaskProgress = (taskId, status, error = null) => {
+        const currentTime = Date.now();
+
+        // 记录任务开始时间
+        if (status === 'running') {
+          const task = taskId ? self.taskList.find(t => t.id === taskId) : self.taskList[taskIndex];
+          if (task) {
+            task.startTime = currentTime;
+            task.duration = null; // 重置耗时
+            console.log('[TaskProgress] Task started at:', new Date(currentTime).toLocaleTimeString(), 'for task:', task.originalLabel);
+          }
+        }
+
+        // 记录任务结束时间并计算耗时
+        if (status === 'success' || status === 'error') {
+          const task = taskId ? self.taskList.find(t => t.id === taskId) : self.taskList[taskIndex];
+          if (task && task.startTime) {
+            task.endTime = currentTime;
+            task.duration = currentTime - task.startTime;
+            console.log('[TaskProgress] Task completed in:', self.formatDuration(task.duration), 'for task:', task.originalLabel);
+          }
+
+          // 检查是否所有任务都完成了
+          const allCompleted = self.taskList.every(t =>
+            t.status === 'success' || t.status === 'error'
+          );
+
+          if (allCompleted) {
+            self.taskEndTime = currentTime;
+            self.totalDuration = self.calculateTotalDuration();
+            self.stopRealTimeUpdate(); // 停止实时更新
+            console.log('[TaskProgress] All tasks completed. Total duration:', self.formatDuration(self.totalDuration));
+          }
+        }
         console.log('[TaskProgress] __updateTaskProgress called:', { taskId, status, error, taskIndex, taskListLength: self.taskList.length });
 
         // 如果传入了taskId，则根据taskId查找任务
@@ -565,6 +750,7 @@ watch: {
                 if (self.taskList[i].status === 'pending') {
                   taskIndex = i;
                   self.taskList[i].status = 'running';
+                  self.taskList[i].startTime = currentTime;
                   console.log('[TaskProgress] Next task set to running:', self.taskList[i]);
                   break;
                 }
@@ -588,6 +774,7 @@ watch: {
               // 如果还有下一个任务，设置为运行中
               if (taskIndex < self.taskList.length) {
                 self.taskList[taskIndex].status = 'running';
+                self.taskList[taskIndex].startTime = currentTime;
                 console.log('[TaskProgress] Next task set to running:', self.taskList[taskIndex]);
               }
             }
@@ -611,14 +798,18 @@ watch: {
 
       // 设置第一个任务为运行中
       if (this.taskList.length > 0) {
+        const currentTime = Date.now();
+
         // 找到第一个pending状态的任务设置为running
         const firstPendingTask = this.taskList.find(task => task.status === 'pending');
         if (firstPendingTask) {
           firstPendingTask.status = 'running';
+          firstPendingTask.startTime = currentTime;
           console.log('[TaskProgress] First pending task set to running:', firstPendingTask);
         } else {
           // 如果没有pending任务，设置第一个任务为running
           this.taskList[0].status = 'running';
+          this.taskList[0].startTime = currentTime;
           console.log('[TaskProgress] First task set to running (fallback):', this.taskList[0]);
         }
 
@@ -653,5 +844,89 @@ watch: {
   background-color: var(--utools-bg-color);
   flex: 1;
   overflow-y: auto;
+}
+
+/* 任务进度相关样式 */
+.task-item {
+  padding: 12px 16px;
+}
+
+.task-title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.task-program-chip {
+  flex-shrink: 0;
+  font-size: 11px;
+  font-weight: 600;
+  min-height: 20px;
+  padding: 2px 8px;
+}
+
+.task-original-title {
+  font-weight: 500;
+  font-size: 14px;
+  line-height: 1.3;
+  word-break: break-word;
+}
+
+.task-custom-title {
+  font-weight: 400;
+  font-size: 13px;
+  line-height: 1.3;
+  word-break: break-word;
+  color: #666;
+  margin-top: 2px;
+}
+
+.task-desc {
+  margin-top: 2px;
+  font-size: 12px;
+  opacity: 0.7;
+  line-height: 1.3;
+}
+
+.task-duration {
+  margin-top: 4px;
+  font-size: 11px;
+  color: #666;
+  display: flex;
+  align-items: center;
+}
+
+.task-error {
+  margin-top: 4px;
+  font-size: 12px;
+  display: flex;
+  align-items: center;
+  line-height: 1.3;
+}
+
+.running-indicator {
+  color: #1976d2;
+  font-weight: 600;
+  animation: blink 1s infinite;
+}
+
+@keyframes blink {
+  0%, 50% { opacity: 1; }
+  51%, 100% { opacity: 0.3; }
+}
+
+.total-duration-chip {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+/* 深色模式适配 */
+.body--dark .task-duration {
+  color: #aaa;
+}
+
+.body--dark .task-custom-title {
+  color: #aaa;
 }
 </style>
