@@ -31,6 +31,15 @@
               ></q-icon>
             </q-avatar>
             <span class="text-weight-bold text-h7">运行结果</span>
+            <q-chip
+              v-if="currentProgramInfo && currentCommand && currentCommand.program !== 'quickcomposer'"
+              :color="currentProgramInfo.color"
+              text-color="white"
+              size="sm"
+              class="q-ml-sm"
+            >
+              {{ currentProgramInfo.shortName || currentProgramInfo.name }}
+            </q-chip>
           </div>
           <ResultMenu
             class="no-shadow q-pa-sm"
@@ -54,16 +63,38 @@
           <div v-if="showTaskProgress && taskList.length > 0" class="q-pa-md">
             <div class="text-h6 q-mb-md flex items-center justify-between">
               <span>任务执行进度</span>
-              <q-chip
-                v-if="totalDuration !== null"
-                color="primary"
-                text-color="white"
-                size="sm"
-                class="total-duration-chip"
-              >
-                <q-icon name="timer" size="xs" class="q-mr-xs" />
-                总耗时: {{ formatDuration(totalDuration) }}
-              </q-chip>
+              <div class="flex items-center q-gutter-sm">
+                <q-chip
+                  v-if="totalDuration !== null"
+                  color="primary"
+                  text-color="white"
+                  size="sm"
+                  class="total-duration-chip"
+                >
+                  <q-icon name="timer" size="xs" class="q-mr-xs" />
+                  总耗时: {{ formatDuration(totalDuration) }}
+                </q-chip>
+                <q-btn
+                  v-if="isTaskRunning && !isTaskCancelled"
+                  @click="cancelTasks"
+                  color="negative"
+                  size="sm"
+                  icon="stop"
+                  label="终止"
+                  dense
+                  unelevated
+                />
+                <q-btn
+                  v-if="isAllTasksFinished && currentCommand"
+                  @click="restartTasks"
+                  color="primary"
+                  size="sm"
+                  icon="refresh"
+                  label="重新开始"
+                  dense
+                  unelevated
+                />
+              </div>
             </div>
             <q-list bordered separator>
               <q-item v-for="task in taskList" :key="task.id" class="task-item">
@@ -161,6 +192,7 @@ import { generateFlowsCode } from "js/composer/generateCode";
 import { dbManager } from "js/utools.js";
 import programs from "js/options/programs.js";
 import { useCommandManager } from "js/commandManager.js";
+import { findCommandByValue } from "js/composer/composerConfig";
 
 export default {
   components: { ResultArea, ResultMenu },
@@ -194,6 +226,8 @@ export default {
       taskStartTime: null, // 所有任务开始时间
       taskEndTime: null, // 所有任务结束时间
       realTimeUpdateTimer: null, // 实时更新定时器
+      isTaskCancelled: false, // 任务是否被取消
+      allTasksCompleted: false, // 所有任务是否已完成
     };
   },
   computed: {
@@ -213,6 +247,29 @@ export default {
     isDataUrl() {
       return this.runResult.join("").includes("data:image/");
     },
+    // 获取当前命令的程序信息
+    currentProgramInfo() {
+      if (!this.currentCommand) {
+        return null;
+      }
+
+      const program = this.currentCommand.program;
+      if (!program) {
+        return null;
+      }
+
+      return this.getProgramInfo(program);
+    },
+    // 是否有任务正在运行或待执行
+    isTaskRunning() {
+      return this.taskList.some(task => task.status === 'running' || task.status === 'pending');
+    },
+    // 是否所有任务都已完成（成功或失败）
+    isAllTasksFinished() {
+      return this.taskList.length > 0 && this.taskList.every(task =>
+        task.status === 'success' || task.status === 'error'
+      );
+    },
   },
 watch: {
     showTaskProgress(newVal) {
@@ -227,11 +284,80 @@ watch: {
     closeTaskProgress() {
       this.showTaskProgress = false;
       this.taskList = [];
+      this.isTaskCancelled = false;
+      this.allTasksCompleted = false;
+      this.totalDuration = null;
+      this.taskStartTime = null;
+      this.taskEndTime = null;
+    },
+    // 重新开始任务
+    restartTasks() {
+      console.log('[TaskProgress] Restarting tasks...');
+      if (!this.currentCommand) {
+        console.error('[TaskProgress] No current command to restart');
+        return;
+      }
+
+      // 重置所有状态
+      this.isTaskCancelled = false;
+      this.allTasksCompleted = false;
+      this.totalDuration = null;
+      this.taskStartTime = null;
+      this.taskEndTime = null;
+
+      // 重新执行命令（传入保存的currentCommand）
+      this.runCurrentCommand(this.currentCommand);
+    },
+    // 取消任务执行
+    cancelTasks() {
+      console.log('[TaskProgress] cancelTasks called');
+      console.log('[TaskProgress] Current isTaskCancelled:', this.isTaskCancelled);
+      console.log('[TaskProgress] window.__cancelTaskExecution exists:', typeof window.__cancelTaskExecution !== 'undefined');
+      console.log('[TaskProgress] window.__isTaskCancelled exists:', typeof window.__isTaskCancelled !== 'undefined');
+
+      // 使用原生confirm对话框
+      if (confirm('确定要终止当前及后续任务吗？')) {
+        console.log('[TaskProgress] User confirmed cancellation');
+        console.log('[TaskProgress] Setting isTaskCancelled to true');
+        this.isTaskCancelled = true;
+        console.log('[TaskProgress] isTaskCancelled is now:', this.isTaskCancelled);
+
+        // 将所有pending和running状态的任务标记为cancelled
+        this.taskList.forEach(task => {
+          if (task.status === 'pending' || task.status === 'running') {
+            console.log('[TaskProgress] Marking task as cancelled:', task.originalLabel);
+            task.status = 'error';
+            task.error = '任务已被用户终止';
+          }
+        });
+
+        // 触发响应式更新
+        this.taskList = [...this.taskList];
+        console.log('[TaskProgress] Task list updated');
+
+        // 通知全局取消标志
+        if (window.__cancelTaskExecution) {
+          console.log('[TaskProgress] Calling window.__cancelTaskExecution()');
+          window.__cancelTaskExecution();
+        } else {
+          console.warn('[TaskProgress] window.__cancelTaskExecution not found!');
+        }
+
+        // 验证取消状态
+        if (window.__isTaskCancelled) {
+          console.log('[TaskProgress] Verification: __isTaskCancelled() returns:', window.__isTaskCancelled());
+        }
+      } else {
+        console.log('[TaskProgress] User cancelled the cancellation');
+      }
     },
     // 运行命令
     async runCurrentCommand(currentCommand) {
       console.log('[TaskProgress] ========== runCurrentCommand START ==========');
       console.log('[TaskProgress] currentCommand:', currentCommand);
+
+      // 保存当前命令信息，用于显示程序类型
+      this.currentCommand = currentCommand;
 
       let command = window.lodashM.cloneDeep(currentCommand);
       if (!command.output) command.output = "text";
@@ -533,6 +659,10 @@ watch: {
       this.taskList = [];
       this.stopRealTimeUpdate();
 
+      // 重置取消标志（新任务开始）
+      this.isTaskCancelled = false;
+      this.allTasksCompleted = false;
+
       if (command.program !== "quickcomposer" || !command.flows) {
         console.log('[TaskProgress] Not a composer command or no flows');
         console.log('[TaskProgress] program:', command.program);
@@ -563,7 +693,19 @@ watch: {
           return !isDisabled;
         })
         .map((cmd, index) => {
-          console.log(`[TaskProgress] Processing command ${index}:`, JSON.stringify(cmd, null, 2));
+          // 从命令值获取完整的命令信息
+          const fullCommand = findCommandByValue(cmd.value);
+
+          // 获取程序名称的优先级：
+          // 1. 对于运行脚本命令，从 argvs.language 获取实际语言
+          // 2. 使用 fullCommand 的 program 属性
+          // 3. 使用 cmd 的 program 属性
+          let programName = fullCommand?.program || cmd.program;
+          if (cmd.value === 'quickcommand.runCode' && cmd.argvs?.language) {
+            programName = cmd.argvs.language;
+          }
+          console.log(`[TaskProgress] Task ${index} programName: ${programName}`);
+
           const task = {
             id: cmd.id || `task_${index}`,
             originalLabel: cmd.label || cmd.desc || cmd.value || `任务 ${index + 1}`,
@@ -572,7 +714,7 @@ watch: {
             status: 'pending', // pending, running, success, error
             error: null,
             // 程序信息
-            programInfo: this.getProgramInfo(cmd.program),
+            programInfo: this.getProgramInfo(programName),
             // 执行时间相关
             startTime: null,
             endTime: null,
@@ -692,6 +834,20 @@ watch: {
       let taskIndex = 0;
       const self = this;
 
+      // 注意：不在这里重置取消标志，避免在任务执行过程中被意外重置
+      // 取消标志只在 restartTasks() 中重置
+
+      // 创建全局取消函数
+      window.__cancelTaskExecution = () => {
+        self.isTaskCancelled = true;
+        console.log('[TaskProgress] Task execution cancelled by user');
+      };
+
+      // 创建全局检查取消状态的函数
+      window.__isTaskCancelled = () => {
+        return self.isTaskCancelled;
+      };
+
       // 创建一个全局函数，用于更新任务状态
       window.__updateTaskProgress = (taskId, status, error = null) => {
         const currentTime = Date.now();
@@ -723,6 +879,7 @@ watch: {
           if (allCompleted) {
             self.taskEndTime = currentTime;
             self.totalDuration = self.calculateTotalDuration();
+            self.allTasksCompleted = true; // 标记所有任务已完成
             self.stopRealTimeUpdate(); // 停止实时更新
             console.log('[TaskProgress] All tasks completed. Total duration:', self.formatDuration(self.totalDuration));
           }

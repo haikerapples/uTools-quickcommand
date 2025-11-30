@@ -48,8 +48,19 @@ export function generateCode(flow) {
     if (cmd.disabled) return;
     if (!cmd.code) return;
 
-// 添加任务开始标记
+// 添加任务开始标记和取消检查
     code.push(indent + `// 任务 ${cmdIndex + 1}: ${cmd.label || cmd.desc || ''}`);
+    code.push(indent + `// 检查任务是否被取消`);
+    code.push(indent + `console.log('[Composer] Checking if task ${cmdIndex + 1} is cancelled...')${comma}`);
+    code.push(indent + `console.log('[Composer] __isTaskCancelled exists:', typeof __isTaskCancelled !== 'undefined')${comma}`);
+    code.push(indent + `if (typeof __isTaskCancelled !== 'undefined') {`);
+    code.push(indent + indent + `console.log('[Composer] __isTaskCancelled() returns:', __isTaskCancelled())${comma}`);
+    code.push(indent + `}`);
+    code.push(indent + `if (typeof __isTaskCancelled !== 'undefined' && __isTaskCancelled()) {`);
+    code.push(indent + indent + `console.log('[Composer] Task ${cmdIndex + 1} cancelled by user, throwing error')${comma}`);
+    code.push(indent + indent + `typeof __updateTaskProgress !== 'undefined' && __updateTaskProgress('${cmd.id || `task_${cmdIndex}`}', 'error', '任务已被用户终止')${comma}`);
+    code.push(indent + indent + `throw new Error('TASK_CANCELLED_BY_USER')${comma}`);
+    code.push(indent + `}`);
     code.push(indent + `console.log('[Composer] Starting task ${cmdIndex + 1} with ID: ${cmd.id || `task_${cmdIndex}`}')${comma}`);
     code.push(indent + `console.log('[Composer] About to call __updateTaskProgress for task ${cmdIndex + 1}')${comma}`);
     code.push(indent + `console.log('[Composer] __updateTaskProgress exists:', typeof __updateTaskProgress !== 'undefined')${comma}`);
@@ -189,9 +200,18 @@ cmdCode = `${cmdCode}.then((${promiseName})=>{
 
   code.push("};"); // Close the function
 
-// 如果是主函数，则自动执行
+// 如果是主函数，则自动执行，并添加错误处理
   if (funcName === "main") {
-    code.push("\nmain();"); // Call the main function
+    code.push("\n// 执行主函数并处理取消情况");
+    code.push("main().catch(err => {");
+    code.push("  if (err && err.message === 'TASK_CANCELLED_BY_USER') {");
+    code.push("    console.log('[Composer] Execution cancelled by user');");
+    code.push("  } else if (typeof __isTaskCancelled !== 'undefined' && __isTaskCancelled()) {");
+    code.push("    console.log('[Composer] Execution cancelled by user');");
+    code.push("  } else {");
+    code.push("    console.error('[Composer] Execution error:', err);");
+    code.push("  }");
+    code.push("});");
   }
 
   const finalCode = code.join("\n");

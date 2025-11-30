@@ -12,6 +12,15 @@ const programs = {
     icon: "logo/quickcommand.png",
     shortName: "qc",
   },
+  quickcomposer: {
+    name: "quickcomposer",
+    bin: "",
+    argv: "",
+    ext: "",
+    color: "secondary",
+    icon: "logo/quickcommand.png",
+    shortName: "composer",
+  },
   html: {
     name: "html",
     bin: "",

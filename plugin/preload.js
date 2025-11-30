@@ -301,6 +301,11 @@ let sandboxWithAD = Object.assign(addVars, sandbox);
   // 将__updateTaskProgress拦截器添加到sandbox中，确保Compartment内部能访问
   sandboxWithAD.__updateTaskProgress = window.__updateTaskProgress;
 
+  // 将__isTaskCancelled和__cancelTaskExecution也注入到沙箱中
+  sandboxWithAD.__isTaskCancelled = window.__isTaskCancelled;
+  sandboxWithAD.__cancelTaskExecution = window.__cancelTaskExecution;
+  console.log('[runCodeInSandbox] Injected __isTaskCancelled and __cancelTaskExecution into sandbox');
+
   // 调试：检查quickcommand.runCode是否存在
   console.log('[runCodeInSandbox] window.quickcommand:', window.quickcommand);
   console.log('[runCodeInSandbox] window.quickcommand.runCode:', window.quickcommand?.runCode);
