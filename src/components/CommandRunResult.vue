@@ -6,6 +6,7 @@
       @hide="stopRun"
       :maximized="fromUtools"
       :transition-duration="fromUtools ? 0 : 200"
+      :persistent="isTaskRunning"
     >
       <q-card
         :style="{
@@ -179,6 +180,19 @@
         </q-menu>
       </q-card>
     </q-dialog>
+
+    <!-- 浮动按钮：当对话框关闭但有任务进度时显示 -->
+    <q-btn
+      v-if="showFloatingButton"
+      fab
+      color="primary"
+      icon="visibility"
+      :style="floatingButtonStyle"
+      @mousedown="startDrag"
+      @click="handleFloatingButtonClick"
+    >
+      <q-tooltip>{{ isDragging ? '拖动调整位置' : '查看任务进度' }}</q-tooltip>
+    </q-btn>
   </div>
 </template>
 
@@ -228,6 +242,13 @@ export default {
       realTimeUpdateTimer: null, // 实时更新定时器
       isTaskCancelled: false, // 任务是否被取消
       allTasksCompleted: false, // 所有任务是否已完成
+      wasManuallyClosedDuringTask: false, // 用户是否在任务期间手动关闭了对话框
+      // 浮动按钮拖动相关
+      floatingButtonPosition: { x: null, y: null }, // 浮动按钮位置
+      isDragging: false, // 是否正在拖动
+      dragStartPos: { x: 0, y: 0 }, // 拖动开始位置（鼠标相对按钮的偏移）
+      dragStartMousePos: { x: 0, y: 0 }, // 鼠标按下时的绝对位置
+      hasMoved: false, // 是否发生了移动
     };
   },
   computed: {
@@ -270,6 +291,35 @@ export default {
         task.status === 'success' || task.status === 'error'
       );
     },
+    // 是否显示浮动按钮：对话框关闭 且 有任务进度信息
+    showFloatingButton() {
+      return !this.isResultShow && this.showTaskProgress && this.taskList.length > 0;
+    },
+    // 浮动按钮的样式
+    floatingButtonStyle() {
+      const baseStyle = {
+        position: 'fixed',
+        zIndex: 9999,
+        cursor: this.isDragging ? 'grabbing' : 'grab',
+        userSelect: 'none',
+      };
+
+      // 如果有保存的位置，使用保存的位置
+      if (this.floatingButtonPosition.x !== null && this.floatingButtonPosition.y !== null) {
+        return {
+          ...baseStyle,
+          left: this.floatingButtonPosition.x + 'px',
+          top: this.floatingButtonPosition.y + 'px',
+        };
+      }
+
+      // 默认位置：右下角
+      return {
+        ...baseStyle,
+        right: '16px',
+        bottom: '16px',
+      };
+    },
   },
 watch: {
     showTaskProgress(newVal) {
@@ -304,9 +354,105 @@ watch: {
       this.totalDuration = null;
       this.taskStartTime = null;
       this.taskEndTime = null;
+      this.wasManuallyClosedDuringTask = false;
 
       // 重新执行命令（传入保存的currentCommand）
       this.runCurrentCommand(this.currentCommand);
+    },
+    // 重新打开结果面板
+    reopenResultPanel() {
+      console.log('[TaskProgress] Reopening result panel...');
+      this.isResultShow = true;
+      this.wasManuallyClosedDuringTask = false;
+    },
+    // 处理浮动按钮点击事件（区分点击和拖动）
+    handleFloatingButtonClick(event) {
+      // 如果发生了移动（拖动），不触发点击
+      if (this.hasMoved) {
+        return;
+      }
+      this.reopenResultPanel();
+    },
+    // 开始拖动
+    startDrag(event) {
+      this.isDragging = true;
+      this.hasMoved = false; // 重置移动标志
+
+      // 获取按钮当前位置
+      const btn = event.currentTarget;
+      const rect = btn.getBoundingClientRect();
+
+      // 记录鼠标相对于按钮的偏移
+      this.dragStartPos = {
+        x: event.clientX - rect.left,
+        y: event.clientY - rect.top,
+      };
+
+      // 记录鼠标按下时的绝对位置
+      this.dragStartMousePos = {
+        x: event.clientX,
+        y: event.clientY,
+      };
+
+      // 如果还没有设置位置，使用当前位置
+      if (this.floatingButtonPosition.x === null) {
+        this.floatingButtonPosition = {
+          x: rect.left,
+          y: rect.top,
+        };
+      }
+
+      // 添加全局事件监听
+      document.addEventListener('mousemove', this.onDrag);
+      document.addEventListener('mouseup', this.stopDrag);
+
+      // 阻止默认行为
+      event.preventDefault();
+    },
+    // 拖动中
+    onDrag(event) {
+      if (!this.isDragging) return;
+
+      // 计算鼠标移动距离
+      const deltaX = Math.abs(event.clientX - this.dragStartMousePos.x);
+      const deltaY = Math.abs(event.clientY - this.dragStartMousePos.y);
+      const distance = Math.sqrt(deltaX * deltaX + deltaY * deltaY);
+
+      // 如果移动距离超过5像素，认为是拖动而非点击
+      if (distance > 5) {
+        this.hasMoved = true;
+      }
+
+      // 计算新位置
+      let newX = event.clientX - this.dragStartPos.x;
+      let newY = event.clientY - this.dragStartPos.y;
+
+      // 限制在窗口范围内（留出按钮大小的空间）
+      const btnSize = 56; // FAB按钮的大小
+      const maxX = window.innerWidth - btnSize;
+      const maxY = window.innerHeight - btnSize;
+
+      newX = Math.max(0, Math.min(newX, maxX));
+      newY = Math.max(0, Math.min(newY, maxY));
+
+      // 更新位置
+      this.floatingButtonPosition = {
+        x: newX,
+        y: newY,
+      };
+    },
+    // 停止拖动
+    stopDrag() {
+      this.isDragging = false;
+
+      // 移除全局事件监听
+      document.removeEventListener('mousemove', this.onDrag);
+      document.removeEventListener('mouseup', this.stopDrag);
+
+      // 延迟重置hasMoved标志，确保click事件能正确判断
+      setTimeout(() => {
+        this.hasMoved = false;
+      }, 50);
     },
     // 取消任务执行
     cancelTasks() {
@@ -613,6 +759,12 @@ watch: {
 
       // 清理任务进度相关资源
       this.stopRealTimeUpdate();
+
+      // 如果有任务进度信息，标记为手动关闭
+      if (this.showTaskProgress && this.taskList.length > 0) {
+        this.wasManuallyClosedDuringTask = true;
+      }
+
       // 注意：不清除showTaskProgress、taskList和totalDuration，让用户能看到最终结果
       // 只有在新的任务开始时才会重置这些值
     },
@@ -662,6 +814,7 @@ watch: {
       // 重置取消标志（新任务开始）
       this.isTaskCancelled = false;
       this.allTasksCompleted = false;
+      this.wasManuallyClosedDuringTask = false;
 
       if (command.program !== "quickcomposer" || !command.flows) {
         console.log('[TaskProgress] Not a composer command or no flows');
@@ -735,6 +888,9 @@ watch: {
 
       // 显示任务进度
       if (this.showTaskProgress) {
+        // 确保对话框显示（即使之前被关闭了）
+        this.isResultShow = true;
+
         // 记录任务总开始时间
         this.taskStartTime = Date.now();
         this.taskEndTime = null;
@@ -981,6 +1137,9 @@ watch: {
   },
   unmounted() {
     this.stopRun();
+    // 清理拖动事件监听器
+    document.removeEventListener('mousemove', this.onDrag);
+    document.removeEventListener('mouseup', this.stopDrag);
   },
 };
 </script>
