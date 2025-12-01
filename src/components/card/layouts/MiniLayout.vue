@@ -77,6 +77,7 @@ export default {
   /* max-width: 90%; */
   margin: 0 auto;
   /* padding: 0 8px; */
-  font-size: 14px;
+  font-size: 16px;
+  font-weight: bold;
 }
 </style>

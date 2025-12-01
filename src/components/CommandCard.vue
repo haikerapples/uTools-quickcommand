@@ -13,7 +13,7 @@
     <!-- mini 模式下不显示各类按钮 -->
     <ControlButtons
       ref="controlButtons"
-      v-model:isVisible="isWarpperHover"
+      :isVisible="isControlButtonsVisible"
       v-show="cardStyle.code > 1"
       :toggleBtnSize="cardStyle.code === 3 ? 'xs' : 'sm'"
       :isActivated="isCommandActivated"
@@ -63,6 +63,11 @@ export default {
       // 窗口模式
       if (cmds[0].type && cmds[0].type === "window") return false;
       return true;
+    },
+    isControlButtonsVisible() {
+      // 双列视图(cardStyle.code=2)和三列视图(cardStyle.code=3)默认显示按钮
+      // 单列视图(cardStyle.code=1)只在鼠标悬停时显示
+      return this.cardStyle.code > 1 || this.isWarpperHover;
     },
   },
   props: {

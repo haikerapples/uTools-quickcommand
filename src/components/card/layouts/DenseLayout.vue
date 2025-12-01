@@ -17,14 +17,15 @@
 
     <!-- 名称 -->
     <div class="row justify-end">
-      <div
-        class="text-ellipsis"
-        v-html="purify(commandInfo.features.explain)"
-      />
+      <div class="text-ellipsis">
+        <span class="name-label" style="color: white; font-size: 16px">指令名称：</span>
+        <span v-html="purify(commandInfo.features.explain)" />
+      </div>
     </div>
 
     <!-- 匹配模式 -->
     <div class="row justify-end">
+      <span class="name-label" style="color: white; font-size: 16px">指令标签：</span>
       <CommandTypeTag
         :cmds="commandInfo.features.cmds"
         :isGrayColor="!isPlatformSupported || !isActivated"
@@ -106,6 +107,12 @@ export default {
   text-overflow: ellipsis;
   white-space: nowrap;
   max-width: 100%;
-  font-size: 14px;
+  font-size: 16px;
+  font-weight: bold;
+}
+
+.name-label {
+  color: #666;
+  font-weight: normal;
 }
 </style>

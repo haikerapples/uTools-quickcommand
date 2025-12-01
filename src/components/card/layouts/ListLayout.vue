@@ -15,16 +15,18 @@
       </q-avatar>
       <div class="col">
         <!-- 名称 -->
-        <div
-          class="text-ellipsis"
-          v-html="purify(commandInfo.features.explain)"
-        />
-        <!-- 匹配模式 -->
-        <CommandTypeTag
-          :cmds="commandInfo.features.cmds"
-          :isGrayColor="!isPlatformSupported || !isActivated"
-          :cardStyleCode="cardStyleCode"
-        />
+        <div class="text-ellipsis">
+          <span class="name-label" style="color: white; font-size: 16px">指令名称：</span>
+          <span v-html="purify(commandInfo.features.explain)" />
+        </div>
+        <div class="text-keyword" style="display: flex; align-items: center; gap: 4px;">
+          <span class="name-label" style="color: white; font-size: 16px">指令标签：</span>
+          <!-- 匹配模式 -->
+          <CommandTypeTag
+            :cmds="commandInfo.features.cmds"
+            :isGrayColor="!isPlatformSupported || !isActivated"
+            :cardStyleCode="cardStyleCode"/>
+        </div>
       </div>
     </div>
     <!-- 语言类型 -->
@@ -100,7 +102,13 @@ export default {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 14px;
   max-width: 100%;
+  font-size: 16px;
+  font-weight: bold;
+}
+
+.name-label {
+  color: #666;
+  font-weight: normal;
 }
 </style>
