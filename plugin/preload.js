@@ -210,15 +210,10 @@ window.runCodeInSandbox = (code, callback, addVars = {}) => {
     }
   };
 
-// 清理函数：恢复原始函数
+// 清理函数
   let cleanup = () => {
     console.log('[runCodeInSandbox] Cleaning up...');
-
-    // 恢复原始的window.__updateTaskProgress
-    if (originalUpdateTaskProgress) {
-      window.__updateTaskProgress = originalUpdateTaskProgress;
-      console.log('[runCodeInSandbox] Original window.__updateTaskProgress restored');
-    }
+    // 不再需要恢复全局拦截器，因为每个沙箱实例使用自己的拦截器
   };
 
   // 包装finalCallback，确保每次调用都执行清理
@@ -240,37 +235,6 @@ window.runCodeInSandbox = (code, callback, addVars = {}) => {
       cleanup();
     }
   };
-
-// 直接替换window.__updateTaskProgress为我们的拦截器
-  const originalUpdateTaskProgress = window.__updateTaskProgress;
-  window.__updateTaskProgress = (taskId, status, error = null) => {
-    console.log('[runCodeInSandbox] __updateTaskProgress intercepted:', { taskId, status, error });
-    console.log('[runCodeInSandbox] Call stack:', new Error().stack);
-
-    // 跟踪任务状态
-    if (status === 'running') {
-      pendingCallbacks++;
-      hasAsyncOperations = true;
-      console.log('[runCodeInSandbox] Task started, pendingCallbacks:', pendingCallbacks);
-    } else if (status === 'success' || status === 'error' || status === 'cancelled') {
-      // 只有在有对应的running状态时才减少计数
-      if (pendingCallbacks > 0) {
-        pendingCallbacks--;
-      }
-      console.log('[runCodeInSandbox] Task completed, pendingCallbacks:', pendingCallbacks);
-      checkAsyncComplete();
-    }
-
-    // 调用原始函数更新UI
-    if (originalUpdateTaskProgress && typeof originalUpdateTaskProgress === 'function') {
-      console.log('[runCodeInSandbox] Calling original function...');
-      originalUpdateTaskProgress(taskId, status, error);
-    } else {
-      console.log('[runCodeInSandbox] Original function not available');
-    }
-  };
-
-  console.log('[runCodeInSandbox] window.__updateTaskProgress replaced with interceptor');
 
 sandbox.console = {
     log: (...stdout) => {
@@ -298,13 +262,62 @@ let sandboxWithAD = Object.assign(addVars, sandbox);
   // 使用完整的window.quickcommand（包含Vue组件添加的runCode函数）
   sandboxWithAD.quickcommand = window.quickcommand;
 
-  // 将__updateTaskProgress拦截器添加到sandbox中，确保Compartment内部能访问
-  sandboxWithAD.__updateTaskProgress = window.__updateTaskProgress;
+  // 获取sessionId（如果有的话）
+  const sessionId = addVars.__sessionId;
 
-  // 将__isTaskCancelled和__cancelTaskExecution也注入到沙箱中
-  sandboxWithAD.__isTaskCancelled = window.__isTaskCancelled;
-  sandboxWithAD.__cancelTaskExecution = window.__cancelTaskExecution;
-  console.log('[runCodeInSandbox] Injected __isTaskCancelled and __cancelTaskExecution into sandbox');
+  // 根据sessionId创建会话专属的函数包装器
+  if (sessionId) {
+    console.log('[runCodeInSandbox] Creating session-specific wrappers for:', sessionId);
+
+    // 为__isTaskCancelled创建会话专属包装器
+    const sessionIsTaskCancelled = window[`__isTaskCancelled_${sessionId}`];
+    if (sessionIsTaskCancelled) {
+      sandboxWithAD.__isTaskCancelled = sessionIsTaskCancelled;
+    } else {
+      sandboxWithAD.__isTaskCancelled = () => false;
+    }
+
+    // 为__updateTaskProgress创建会话专属包装器
+    const sessionUpdateTaskProgress = window[`__updateTaskProgress_${sessionId}`];
+    if (sessionUpdateTaskProgress) {
+      // 创建一个包装函数，同时处理异步跟踪和UI更新
+      sandboxWithAD.__updateTaskProgress = (taskId, status, error) => {
+        // 跟踪任务状态（用于异步操作检测）
+        if (status === 'running') {
+          pendingCallbacks++;
+          hasAsyncOperations = true;
+          console.log('[runCodeInSandbox] Task started for session:', sessionId, 'pendingCallbacks:', pendingCallbacks);
+        } else if (status === 'success' || status === 'error' || status === 'cancelled') {
+          if (pendingCallbacks > 0) {
+            pendingCallbacks--;
+          }
+          console.log('[runCodeInSandbox] Task completed for session:', sessionId, 'pendingCallbacks:', pendingCallbacks);
+          checkAsyncComplete();
+        }
+
+        // 调用会话专属函数更新UI
+        sessionUpdateTaskProgress(taskId, status, error);
+      };
+    } else {
+      // 如果没有会话专属函数，使用拦截器
+      sandboxWithAD.__updateTaskProgress = window.__updateTaskProgress;
+    }
+
+    // 为__cancelTaskExecution创建会话专属包装器
+    const sessionCancelTaskExecution = window[`__cancelTaskExecution_${sessionId}`];
+    if (sessionCancelTaskExecution) {
+      sandboxWithAD.__cancelTaskExecution = sessionCancelTaskExecution;
+    } else {
+      sandboxWithAD.__cancelTaskExecution = () => {};
+    }
+  } else {
+    // 没有sessionId时，使用拦截器和全局函数
+    sandboxWithAD.__updateTaskProgress = window.__updateTaskProgress;
+    sandboxWithAD.__isTaskCancelled = window.__isTaskCancelled || (() => false);
+    sandboxWithAD.__cancelTaskExecution = window.__cancelTaskExecution || (() => {});
+  }
+
+  console.log('[runCodeInSandbox] Injected session-specific functions into sandbox');
 
   // 调试：检查quickcommand.runCode是否存在
   console.log('[runCodeInSandbox] window.quickcommand:', window.quickcommand);
@@ -593,7 +606,9 @@ window.runCodeFile = (
   realTime = true
 ) => {
   const { bin, argv, ext, charset, scptarg, envPath, alias } = option;
-  const script = getQuickcommandTempFile(ext, "quickcommandTempScript");
+  // 为每个脚本生成唯一的文件名，避免并发执行时文件被覆盖
+  const uniqueName = `quickcommandTempScript_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+  const script = getQuickcommandTempFile(ext, uniqueName);
 
   // 处理编码和换行
   // 只在 Windows 系统上或特定语言（cmd、bat、powershell）时才转换为 CRLF

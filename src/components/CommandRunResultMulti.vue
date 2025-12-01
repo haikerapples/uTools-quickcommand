@@ -341,10 +341,15 @@ export default {
       switch (currentCommand.program) {
         case "quickcommand":
         case "quickcomposer":
+          console.log('[CommandRunResultMulti] Executing code for session:', sessionId);
+          // 通过addVars传递sessionId，让preload.js处理会话隔离
           window.runCodeInSandbox(
             currentCommand.cmd,
             (stdout, stderr) => this.handleResult(sessionId, stdout, stderr, resultOpts),
-            { enterData: this.$root.enterData }
+            {
+              enterData: this.$root.enterData,
+              __sessionId: sessionId  // 传递sessionId给沙箱
+            }
           );
           break;
         case "html":
@@ -888,8 +893,8 @@ export default {
         return currentSession ? currentSession.isTaskCancelled : false;
       };
 
-      // 创建全局更新函数（兼容旧代码）
-      window.__updateTaskProgress = (taskId, status, error = null) => {
+      // 创建会话专属的更新函数
+      window[`__updateTaskProgress_${sessionId}`] = (taskId, status, error = null) => {
         const currentSession = taskSessionManager.getSession(sessionId);
         if (!currentSession) return;
 
@@ -979,15 +984,9 @@ export default {
         self.refreshActiveSessions();
       };
 
-      // 创建全局取消函数（兼容旧代码）
-      window.__cancelTaskExecution = () => {
-        window[`__cancelTaskExecution_${sessionId}`]();
-      };
-
-      // 创建全局检查取消状态函数（兼容旧代码）
-      window.__isTaskCancelled = () => {
-        return window[`__isTaskCancelled_${sessionId}`]();
-      };
+      // 注意：会话专属函数会在 preload.js 的 runCodeInSandbox 中注入到沙箱
+      // 通过 addVars.__sessionId 传递会话ID，preload.js 会自动将对应的会话函数注入到沙箱中
+      // 每个会话的专属函数命名为：__functionName_${sessionId}
 
       // 设置第一个任务为运行中
       if (session.taskList.length > 0) {
