@@ -51,13 +51,13 @@
   </q-dialog>
 
   <!-- 运行结果 -->
-  <CommandRunResult ref="result"></CommandRunResult>
+  <CommandRunResultMulti ref="result"></CommandRunResultMulti>
 </template>
 
 <script>
 import { defineAsyncComponent, computed } from "vue";
 import CommandConfig from "components/editor/CommandConfig.vue";
-import CommandRunResult from "components/CommandRunResult";
+import CommandRunResultMulti from "components/CommandRunResultMulti";
 import CommandComposer from "components/composer/CommandComposer.vue";
 import CommandLanguage from "components/editor/CommandLanguage";
 import CommandActions from "components/editor/CommandActions";
@@ -87,7 +87,7 @@ export default {
   components: {
     CodeEditor,
     CommandConfig,
-    CommandRunResult,
+    CommandRunResultMulti,
     CommandLanguage,
     CommandActions,
     CommandComposer,

@@ -29,6 +29,7 @@
             'task-running': task.status === 'running',
             'task-success': task.status === 'success',
             'task-error': task.status === 'error',
+            'task-cancelled': task.status === 'cancelled',
           }"
         >
           <div class="task-index">{{ index + 1 }}</div>
@@ -52,6 +53,12 @@
               size="20px"
             />
             <q-icon
+              v-else-if="task.status === 'cancelled'"
+              name="block"
+              color="grey-7"
+              size="20px"
+            />
+            <q-icon
               v-else
               name="radio_button_unchecked"
               color="grey-5"
@@ -70,6 +77,7 @@
             <span v-else-if="task.status === 'running'" class="text-primary">执行中</span>
             <span v-else-if="task.status === 'success'" class="text-positive">已完成</span>
             <span v-else-if="task.status === 'error'" class="text-negative">失败</span>
+            <span v-else-if="task.status === 'cancelled'" class="text-grey-7">已取消</span>
           </div>
         </div>
       </div>
@@ -161,6 +169,12 @@ export default {
 .task-item.task-error {
   border-color: var(--q-negative);
   background-color: rgba(var(--q-negative-rgb), 0.05);
+}
+
+.task-item.task-cancelled {
+  border-color: var(--q-grey-5);
+  background-color: rgba(128, 128, 128, 0.05);
+  opacity: 0.7;
 }
 
 .task-index {

@@ -6,7 +6,6 @@
       @hide="stopRun"
       :maximized="fromUtools"
       :transition-duration="fromUtools ? 0 : 200"
-      :persistent="isTaskRunning"
     >
       <q-card
         :style="{
@@ -41,6 +40,11 @@
             >
               {{ currentProgramInfo.shortName || currentProgramInfo.name }}
             </q-chip>
+            <!-- 可视化编排名称和时间 -->
+            <span v-if="currentCommand && currentCommand.program === 'quickcomposer'" class="q-ml-sm">
+              <span class="text-weight-bold" style="font-size: 14px;">{{ commandName }}</span>
+              <span class="text-caption q-ml-xs" style="opacity: 0.6;">{{ startTimeFormatted }}</span>
+            </span>
           </div>
           <ResultMenu
             class="no-shadow q-pa-sm"
@@ -106,6 +110,8 @@
                         ? 'check_circle'
                         : task.status === 'error'
                         ? 'error'
+                        : task.status === 'cancelled'
+                        ? 'block'
                         : task.status === 'running'
                         ? 'pending'
                         : 'radio_button_unchecked'
@@ -115,6 +121,8 @@
                         ? 'positive'
                         : task.status === 'error'
                         ? 'negative'
+                        : task.status === 'cancelled'
+                        ? 'grey-7'
                         : task.status === 'running'
                         ? 'primary'
                         : 'grey'
@@ -249,11 +257,24 @@ export default {
       dragStartPos: { x: 0, y: 0 }, // 拖动开始位置（鼠标相对按钮的偏移）
       dragStartMousePos: { x: 0, y: 0 }, // 鼠标按下时的绝对位置
       hasMoved: false, // 是否发生了移动
+      createdAt: null, // 会话创建时间
     };
   },
   computed: {
     fromUtools() {
       return this.$route.name === "command";
+    },
+    commandName() {
+      if (!this.currentCommand) return '';
+      return this.currentCommand.features?.explain || '可视化编排';
+    },
+    startTimeFormatted() {
+      if (!this.createdAt) return '';
+      const date = new Date(this.createdAt);
+      const hours = String(date.getHours()).padStart(2, '0');
+      const minutes = String(date.getMinutes()).padStart(2, '0');
+      const seconds = String(date.getSeconds()).padStart(2, '0');
+      return `${hours}:${minutes}:${seconds}`;
     },
     needTempPayload() {
       return !["command", "code", "composer"].includes(this.$route.name);
@@ -355,6 +376,12 @@ watch: {
       this.taskStartTime = null;
       this.taskEndTime = null;
       this.wasManuallyClosedDuringTask = false;
+
+      // 立即清空任务列表，确保进度正确重置
+      this.taskList = [];
+
+      // 停止实时更新定时器
+      this.stopRealTimeUpdate();
 
       // 重新执行命令（传入保存的currentCommand）
       this.runCurrentCommand(this.currentCommand);
@@ -472,7 +499,7 @@ watch: {
         this.taskList.forEach(task => {
           if (task.status === 'pending' || task.status === 'running') {
             console.log('[TaskProgress] Marking task as cancelled:', task.originalLabel);
-            task.status = 'error';
+            task.status = 'cancelled';
             task.error = '任务已被用户终止';
           }
         });
@@ -504,6 +531,8 @@ watch: {
 
       // 保存当前命令信息，用于显示程序类型
       this.currentCommand = currentCommand;
+      // 记录会话创建时间
+      this.createdAt = Date.now();
 
       let command = window.lodashM.cloneDeep(currentCommand);
       if (!command.output) command.output = "text";
@@ -1026,19 +1055,6 @@ watch: {
             task.duration = currentTime - task.startTime;
             console.log('[TaskProgress] Task completed in:', self.formatDuration(task.duration), 'for task:', task.originalLabel);
           }
-
-          // 检查是否所有任务都完成了
-          const allCompleted = self.taskList.every(t =>
-            t.status === 'success' || t.status === 'error'
-          );
-
-          if (allCompleted) {
-            self.taskEndTime = currentTime;
-            self.totalDuration = self.calculateTotalDuration();
-            self.allTasksCompleted = true; // 标记所有任务已完成
-            self.stopRealTimeUpdate(); // 停止实时更新
-            console.log('[TaskProgress] All tasks completed. Total duration:', self.formatDuration(self.totalDuration));
-          }
         }
         console.log('[TaskProgress] __updateTaskProgress called:', { taskId, status, error, taskIndex, taskListLength: self.taskList.length });
 
@@ -1046,9 +1062,12 @@ watch: {
         if (taskId) {
           const task = self.taskList.find(t => t.id === taskId);
           if (task) {
-            task.status = status;
-            if (error) {
-              task.error = error;
+            // 不要覆盖已经被取消的任务状态
+            if (task.status !== 'cancelled') {
+              task.status = status;
+              if (error) {
+                task.error = error;
+              }
             }
             console.log('[TaskProgress] Task updated by ID:', task);
 
@@ -1076,9 +1095,12 @@ watch: {
           // 兼容旧的逻辑：使用taskIndex
           console.log('[TaskProgress] Using taskIndex fallback, current index:', taskIndex);
           if (taskIndex < self.taskList.length) {
-            self.taskList[taskIndex].status = status;
-            if (error) {
-              self.taskList[taskIndex].error = error;
+            // 不要覆盖已经被取消的任务状态
+            if (self.taskList[taskIndex].status !== 'cancelled') {
+              self.taskList[taskIndex].status = status;
+              if (error) {
+                self.taskList[taskIndex].error = error;
+              }
             }
             console.log('[TaskProgress] Task updated by index:', self.taskList[taskIndex]);
 
@@ -1100,12 +1122,28 @@ watch: {
 
         // 检查是否所有任务都已完成
         const allTasksCompleted = self.taskList.every(task =>
-          task.status === 'success' || task.status === 'error'
+          task.status === 'success' || task.status === 'error' || task.status === 'cancelled'
         );
 
         if (allTasksCompleted && self.showTaskProgress) {
-          console.log('[TaskProgress] All tasks completed, keeping task progress view visible');
-          // 不再自动隐藏进度视图，让用户可以查看完整的执行结果
+          console.log('[TaskProgress] All tasks completed');
+
+          // 记录任务结束时间和总耗时
+          if (!self.allTasksCompleted) {
+            self.taskEndTime = currentTime;
+            self.totalDuration = self.calculateTotalDuration();
+            self.allTasksCompleted = true;
+            self.stopRealTimeUpdate();
+            console.log('[TaskProgress] Total duration:', self.formatDuration(self.totalDuration));
+
+            // 如果结果页面处于悬浮框状态，自动关闭悬浮框
+            if (!self.isResultShow) {
+              console.log('[TaskProgress] Auto-closing floating button in 500ms');
+              setTimeout(() => {
+                self.closeTaskProgress();
+              }, 500); // 延迟500ms关闭，让用户看到完成状态
+            }
+          }
         }
       };
 

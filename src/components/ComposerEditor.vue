@@ -38,18 +38,18 @@
     </q-card>
   </q-dialog>
   <!-- 运行结果 -->
-  <CommandRunResult ref="result"></CommandRunResult>
+  <CommandRunResultMulti ref="result"></CommandRunResultMulti>
 </template>
 
 <script>
 import CommandComposer from "components/composer/CommandComposer.vue";
-import CommandRunResult from "components/CommandRunResult";
+import CommandRunResultMulti from "components/CommandRunResultMulti";
 import { useCommandManager } from "js/commandManager.js";
 import { dbManager } from "js/utools";
 import { ref } from "vue";
 
 export default {
-  components: { CommandComposer, CommandRunResult },
+  components: { CommandComposer, CommandRunResultMulti },
   setup() {
     const hasRunComposer = dbManager.getStorage("st_hasRunComposer");
     const showHelpDialog = ref(false);

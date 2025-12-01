@@ -252,7 +252,7 @@ window.runCodeInSandbox = (code, callback, addVars = {}) => {
       pendingCallbacks++;
       hasAsyncOperations = true;
       console.log('[runCodeInSandbox] Task started, pendingCallbacks:', pendingCallbacks);
-    } else if (status === 'success' || status === 'error') {
+    } else if (status === 'success' || status === 'error' || status === 'cancelled') {
       // 只有在有对应的running状态时才减少计数
       if (pendingCallbacks > 0) {
         pendingCallbacks--;

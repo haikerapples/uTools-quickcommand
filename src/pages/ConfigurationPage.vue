@@ -25,7 +25,7 @@
       </div>
     </transition>
 
-    <CommandRunResult ref="result"></CommandRunResult>
+    <CommandRunResultMulti ref="result"></CommandRunResultMulti>
   </div>
 </template>
 
@@ -39,8 +39,8 @@ import FooterBar from "components/config/FooterBar.vue";
 import TagBar from "components/config/TagBar.vue";
 import BackgroundLayer from "components/config/BackgroundLayer.vue";
 import CommandPanels from "components/config/CommandPanels.vue";
-const CommandRunResult = defineAsyncComponent(() =>
-  import("components/CommandRunResult.vue")
+const CommandRunResultMulti = defineAsyncComponent(() =>
+  import("components/CommandRunResultMulti.vue")
 );
 // Performance Rendering > 300ms
 
@@ -48,7 +48,7 @@ export default {
   components: {
     CommandEditor,
     ComposerEditor,
-    CommandRunResult,
+    CommandRunResultMulti,
     FooterBar,
     TagBar,
     BackgroundLayer,

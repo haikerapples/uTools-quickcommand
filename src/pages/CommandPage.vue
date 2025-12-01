@@ -1,15 +1,15 @@
 <template>
   <div>
-    <CommandRunResult ref="result"></CommandRunResult>
+    <CommandRunResultMulti ref="result"></CommandRunResultMulti>
   </div>
 </template>
 
 <script>
-import CommandRunResult from "components/CommandRunResult";
+import CommandRunResultMulti from "components/CommandRunResultMulti";
 import { utoolsFull } from "js/utools.js";
 
 export default {
-  components: { CommandRunResult },
+  components: { CommandRunResultMulti },
   data() {
     return {
       utools: utoolsFull,
