@@ -751,9 +751,19 @@ export default {
         return;
       }
 
-      // 构建任务列表
+      // 构建任务列表（过滤掉调试用的console.log命令节点）
       session.taskList = mainFlow.commands
-        .filter(cmd => !cmd.disabled)
+        .filter(cmd => {
+          // 过滤掉禁用的命令
+          if (cmd.disabled) return false;
+
+          // 过滤掉调试用的console.log命令（没有label、desc、value的命令）
+          if (!cmd.label && !cmd.desc && !cmd.value) {
+            return false;
+          }
+
+          return true;
+        })
         .map((cmd, index) => {
           const fullCommand = findCommandByValue(cmd.value);
           let programName = fullCommand?.program || cmd.program;
@@ -1068,7 +1078,13 @@ export default {
      * 浮动按钮相关方法
      */
     shouldShowFloatingButton(session) {
-      return !session.isResultShow && session.showTaskProgress && session.taskList.length > 0;
+      // 不显示结果面板 && 有任务进度 && 有任务列表 && 任务未全部完成
+      if (!session.isResultShow && session.showTaskProgress && session.taskList.length > 0) {
+        // 检查是否所有任务都已完成
+        const allCompleted = this.isSessionAllTasksFinished(session);
+        return !allCompleted; // 任务全部完成后不显示悬浮按钮
+      }
+      return false;
     },
 
     getFloatingButtonColor(session) {
